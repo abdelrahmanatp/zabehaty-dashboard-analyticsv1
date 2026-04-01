@@ -1,0 +1,36 @@
+# Secrets — never commit
+.env
+.streamlit/secrets.toml
+client_secret_*.json
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Intermediate data — regenerated at runtime
+.tmp/*.csv
+.tmp/*.json
+.tmp/*.txt
+.tmp/*.md
+.tmp/*.db
+.tmp/*.log
+# Keep the .tmp directory itself in git (for the .gitkeep)
+!.tmp/.gitkeep
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user

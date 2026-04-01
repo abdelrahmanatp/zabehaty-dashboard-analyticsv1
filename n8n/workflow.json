@@ -1,0 +1,267 @@
+{
+  "name": "Zabehaty Analytics Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 1,
+              "triggerAtDay": [1],
+              "triggerAtHour": 6
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Weekly Schedule (Mon 6am)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge triggers — whichever fires, continue\nreturn [{ json: { triggered_at: new Date().toISOString(), source: 'trigger' } }];"
+      },
+      "id": "merge-triggers",
+      "name": "Start",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 380]
+    },
+    {
+      "parameters": {
+        "host": "={{ $env.ZABEHATY_DB_HOST }}",
+        "port": "={{ $env.ZABEHATY_DB_PORT }}",
+        "database": "={{ $env.ZABEHATY_DB_NAME }}",
+        "username": "={{ $env.ZABEHATY_DB_USER }}",
+        "password": "={{ $env.ZABEHATY_DB_PASSWORD }}",
+        "query": "SELECT uto.user_id, SUM(uto.total) AS lifetime_value, COUNT(DISTINCT uto.category_id) AS categories_purchased, MAX(uto.updated_at) AS last_order_date, u.is_vip, u.is_military, u.emirate_id FROM user_total_orders uto LEFT JOIN user u ON uto.user_id = u.id WHERE (u.is_ban = 0 OR u.is_ban IS NULL) GROUP BY uto.user_id, u.is_vip, u.is_military, u.emirate_id ORDER BY lifetime_value DESC LIMIT 5000"
+      },
+      "id": "query-user-ltv",
+      "name": "Query User LTV",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2,
+      "position": [640, 200]
+    },
+    {
+      "parameters": {
+        "host": "={{ $env.ZABEHATY_DB_HOST }}",
+        "port": "={{ $env.ZABEHATY_DB_PORT }}",
+        "database": "={{ $env.ZABEHATY_DB_NAME }}",
+        "username": "={{ $env.ZABEHATY_DB_USER }}",
+        "password": "={{ $env.ZABEHATY_DB_PASSWORD }}",
+        "query": "SELECT o.shop_id, s.name_en AS shop_name, COUNT(*) AS total_orders, SUM(o.total) AS revenue, AVG(o.rating) AS avg_rating, s.zabehaty_percentage AS commission_pct FROM orders o LEFT JOIN shops s ON o.shop_id = s.id WHERE o.status = 3 AND o.payment_status = 'completed' AND o.shop_id IS NOT NULL GROUP BY o.shop_id, s.name_en, s.zabehaty_percentage ORDER BY revenue DESC LIMIT 50"
+      },
+      "id": "query-shop-perf",
+      "name": "Query Shop Performance",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2,
+      "position": [640, 360]
+    },
+    {
+      "parameters": {
+        "host": "={{ $env.ZABEHATY_DB_HOST }}",
+        "port": "={{ $env.ZABEHATY_DB_PORT }}",
+        "database": "={{ $env.ZABEHATY_DB_NAME }}",
+        "username": "={{ $env.ZABEHATY_DB_USER }}",
+        "password": "={{ $env.ZABEHATY_DB_PASSWORD }}",
+        "query": "SELECT od.product_id, p.name_en AS product_name, s.name_en AS shop_name, c.name_en AS category_name, COUNT(*) AS order_count, SUM(od.price * od.quantity) AS revenue, AVG(od.price - IFNULL(od.cost_price,0)) AS avg_margin FROM order_details od JOIN orders o ON od.order_id = o.id AND o.status = 3 LEFT JOIN products p ON od.product_id = p.id LEFT JOIN shops s ON o.shop_id = s.id LEFT JOIN categories c ON o.category_id = c.id GROUP BY od.product_id, p.name_en, s.name_en, c.name_en ORDER BY revenue DESC LIMIT 100"
+      },
+      "id": "query-products",
+      "name": "Query Product Performance",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2,
+      "position": [640, 520]
+    },
+    {
+      "parameters": {
+        "host": "={{ $env.ZABEHATY_DB_HOST }}",
+        "port": "={{ $env.ZABEHATY_DB_PORT }}",
+        "database": "={{ $env.ZABEHATY_DB_NAME }}",
+        "username": "={{ $env.ZABEHATY_DB_USER }}",
+        "password": "={{ $env.ZABEHATY_DB_PASSWORD }}",
+        "query": "SELECT category_id, COUNT(DISTINCT user_id) AS users, SUM(total) AS revenue, AVG(total) AS avg_spend FROM user_total_orders GROUP BY category_id ORDER BY revenue DESC"
+      },
+      "id": "query-categories",
+      "name": "Query Category Revenue",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2,
+      "position": [640, 680]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── RFM Scoring in n8n ──────────────────────────────────────\nconst users = $('Query User LTV').all().map(i => i.json);\nconst now = new Date();\n\n// Sort into quintiles\nconst sorted_ltv = [...users].sort((a,b) => a.lifetime_value - b.lifetime_value);\nconst quintile = (arr, val) => {\n  const idx = arr.findIndex(x => x.lifetime_value >= val);\n  const pct = idx / arr.length;\n  if (pct < 0.2) return 1;\n  if (pct < 0.4) return 2;\n  if (pct < 0.6) return 3;\n  if (pct < 0.8) return 4;\n  return 5;\n};\n\nconst scored = users.map(u => {\n  const lastOrder = new Date(u.last_order_date || now);\n  const recency   = Math.max(0, Math.floor((now - lastOrder) / 86400000));\n  const m_score   = quintile(sorted_ltv, u.lifetime_value);\n  const f_score   = Math.min(5, Math.max(1, Math.round(u.categories_purchased)));\n  const r_score   = recency < 30 ? 5 : recency < 90 ? 4 : recency < 180 ? 3 : recency < 365 ? 2 : 1;\n\n  let segment = 'About to Sleep';\n  if (r_score >= 4 && f_score >= 4 && m_score >= 4) segment = 'Champions';\n  else if (r_score >= 3 && m_score >= 4) segment = 'Loyal Customers';\n  else if (r_score >= 4 && f_score <= 2) segment = 'New Customers';\n  else if (r_score <= 2 && f_score >= 3 && m_score >= 3) segment = 'At Risk';\n  else if (r_score <= 2 && f_score >= 4 && m_score >= 4) segment = 'Cant Lose Them';\n  else if (r_score <= 2 && f_score <= 2) segment = 'Lost';\n  else if (r_score == 3 && f_score <= 2) segment = 'Need Attention';\n\n  return { ...u, r_score, f_score, m_score, recency_days: recency, segment };\n});\n\n// Segment summary\nconst summary = {};\nscored.forEach(u => {\n  if (!summary[u.segment]) summary[u.segment] = { segment: u.segment, count: 0, total_ltv: 0 };\n  summary[u.segment].count++;\n  summary[u.segment].total_ltv += parseFloat(u.lifetime_value || 0);\n});\nconst seg_summary = Object.values(summary).sort((a,b) => b.total_ltv - a.total_ltv);\n\nreturn [{ json: { scored_users: scored, segment_summary: seg_summary, total_users: scored.length } }];"
+      },
+      "id": "rfm-scoring",
+      "name": "RFM Scoring",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Build analysis package for Claude ────────────────────────\nconst rfm_data   = $('RFM Scoring').first().json;\nconst shops      = $('Query Shop Performance').all().map(i => i.json);\nconst products   = $('Query Product Performance').all().map(i => i.json);\nconst categories = $('Query Category Revenue').all().map(i => i.json);\n\nconst total_revenue = shops.reduce((s, sh) => s + parseFloat(sh.revenue || 0), 0);\nconst top_shops     = shops.slice(0, 5);\nconst top_products  = products.slice(0, 10);\nconst segments      = rfm_data.segment_summary;\n\nconst analysis_package = {\n  generated_at:    new Date().toISOString(),\n  total_users:     rfm_data.total_users,\n  total_revenue_aed: total_revenue.toFixed(2),\n  segment_summary: segments,\n  top_shops:       top_shops,\n  top_products:    top_products,\n  categories:      categories,\n};\n\nreturn [{ json: { analysis_package } }];"
+      },
+      "id": "build-package",
+      "name": "Build Analysis Package",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 380]
+    },
+    {
+      "parameters": {
+        "model": "claude-opus-4-6",
+        "messages": {
+          "values": [
+            {
+              "role": "user",
+              "content": "={\n'You are a senior data analyst for Zabehaty, a UAE-based Islamic meat marketplace.\\n\\nAnalyse this data and produce a concise board report:\\n\\n' + JSON.stringify($json.analysis_package, null, 2) + '\\n\\nWrite these 4 sections in markdown:\\n\\n## Business Health Snapshot\\n(3-4 bullets with AED numbers)\\n\\n## User Segments\\n(Key findings, who is valuable, who needs attention)\\n\\n## Revenue Risks & Opportunities\\n(Top 3 each, with specific numbers)\\n\\n## Immediate Actions\\n(3 things to do this week, with expected impact)\\n\\nBe direct. UAE market context. No filler.'}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 1500
+        }
+      },
+      "id": "claude-analysis",
+      "name": "Claude — Generate Report",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [1340, 380],
+      "credentials": {
+        "anthropicApi": {
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Assemble final report payload ────────────────────────────\nconst pkg      = $('Build Analysis Package').first().json.analysis_package;\nconst narrative = $('Claude — Generate Report').first().json.text || \n                  $('Claude — Generate Report').first().json.content || \n                  'Report generation failed';\n\nconst report = {\n  title:         'Zabehaty Weekly Analytics Report',\n  generated_at:  pkg.generated_at,\n  kpis: {\n    total_buyers:      pkg.total_users,\n    platform_revenue:  `AED ${parseFloat(pkg.total_revenue_aed).toLocaleString()}`,\n    segments:          pkg.segment_summary.length,\n  },\n  narrative,\n  top_shops:    pkg.top_shops,\n  top_products: pkg.top_products,\n};\n\nreturn [{ json: { report, narrative_text: narrative } }];"
+      },
+      "id": "assemble-report",
+      "name": "Assemble Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 380]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.GOOGLE_SHEETS_SPREADSHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "n8n Reports",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "id": "write-to-sheets",
+      "name": "Write to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1780, 280],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prep Google Sheets row\nconst r = $('Assemble Report').first().json.report;\nreturn [{\n  json: {\n    timestamp:      r.generated_at,\n    total_buyers:   r.kpis.total_buyers,\n    revenue:        r.kpis.platform_revenue,\n    narrative:      r.narrative.substring(0, 5000),\n  }\n}];"
+      },
+      "id": "prep-sheets-row",
+      "name": "Prep Sheets Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Final status\nconst r = $('Assemble Report').first().json.report;\nconsole.log('Report generated:', r.generated_at);\nconsole.log('Total buyers analysed:', r.kpis.total_buyers);\nreturn [{ json: { status: 'success', report_title: r.title, generated_at: r.generated_at } }];"
+      },
+      "id": "done",
+      "name": "Done",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 380]
+    }
+  ],
+  "connections": {
+    "Weekly Schedule (Mon 6am)": {
+      "main": [[{ "node": "Start", "type": "main", "index": 0 }]]
+    },
+    "Manual Trigger": {
+      "main": [[{ "node": "Start", "type": "main", "index": 0 }]]
+    },
+    "Start": {
+      "main": [[
+        { "node": "Query User LTV",          "type": "main", "index": 0 },
+        { "node": "Query Shop Performance",  "type": "main", "index": 0 },
+        { "node": "Query Product Performance","type": "main", "index": 0 },
+        { "node": "Query Category Revenue",  "type": "main", "index": 0 }
+      ]]
+    },
+    "Query User LTV": {
+      "main": [[{ "node": "RFM Scoring", "type": "main", "index": 0 }]]
+    },
+    "Query Shop Performance": {
+      "main": [[{ "node": "Build Analysis Package", "type": "main", "index": 0 }]]
+    },
+    "Query Product Performance": {
+      "main": [[{ "node": "Build Analysis Package", "type": "main", "index": 0 }]]
+    },
+    "Query Category Revenue": {
+      "main": [[{ "node": "Build Analysis Package", "type": "main", "index": 0 }]]
+    },
+    "RFM Scoring": {
+      "main": [[{ "node": "Build Analysis Package", "type": "main", "index": 0 }]]
+    },
+    "Build Analysis Package": {
+      "main": [[{ "node": "Claude — Generate Report", "type": "main", "index": 0 }]]
+    },
+    "Claude — Generate Report": {
+      "main": [[{ "node": "Assemble Report", "type": "main", "index": 0 }]]
+    },
+    "Assemble Report": {
+      "main": [[
+        { "node": "Prep Sheets Row", "type": "main", "index": 0 },
+        { "node": "Done",            "type": "main", "index": 0 }
+      ]]
+    },
+    "Prep Sheets Row": {
+      "main": [[{ "node": "Write to Google Sheets", "type": "main", "index": 0 }]]
+    },
+    "Write to Google Sheets": {
+      "main": [[{ "node": "Done", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "analytics" },
+    { "name": "zabehaty" }
+  ],
+  "meta": {
+    "instanceId": "zabehaty-analytics-v1"
+  }
+}
