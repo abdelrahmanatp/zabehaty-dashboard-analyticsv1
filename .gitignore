@@ -34,3 +34,6 @@ desktop.ini
 .idea/
 *.suo
 *.user
+
+# Deployment spec (contains secrets inline — never commit)
+app.yaml

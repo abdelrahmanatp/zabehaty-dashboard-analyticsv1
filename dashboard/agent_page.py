@@ -247,23 +247,27 @@ def _speak(text: str, lang: str):
     st.components.v1.html(js, height=0)
 
 
-def _audio_to_user_content(audio_bytes: bytes, media_type: str = "audio/wav") -> list:
-    """Convert audio bytes into a Claude multimodal content block."""
-    b64 = base64.standard_b64encode(audio_bytes).decode()
-    return [
-        {
-            "type": "text",
-            "text": "I am sending a voice message. Please transcribe it and answer my question in the same language I spoke."
-        },
-        {
-            "type": "document",
-            "source": {
-                "type":       "base64",
-                "media_type": media_type,
-                "data":       b64,
-            },
-        },
-    ]
+def _transcribe_audio(audio_bytes: bytes) -> str:
+    """
+    Transcribe audio bytes to text using Google STT (free, no API key needed).
+    Tries Arabic first (primary platform language), falls back to English.
+    Returns the transcription string, or an empty string if nothing was heard.
+    """
+    try:
+        import io
+        import speech_recognition as sr
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
+            audio_data = recognizer.record(source)
+        try:
+            return recognizer.recognize_google(audio_data, language="ar-AE")
+        except sr.UnknownValueError:
+            try:
+                return recognizer.recognize_google(audio_data, language="en-US")
+            except sr.UnknownValueError:
+                return ""
+    except Exception as e:
+        return f"[transcription error: {e}]"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -286,6 +290,8 @@ def render_agent_page(t, h, lang: str):
         st.session_state.pending_filename = "zabehaty_report.xlsx"
     if "used_voice" not in st.session_state:
         st.session_state.used_voice = False
+    if "pending_prompt" not in st.session_state:
+        st.session_state.pending_prompt = None
 
     client = _get_client()
     system = build_system_prompt()
@@ -338,16 +344,25 @@ def render_agent_page(t, h, lang: str):
     user_text = st.chat_input(t("agent_placeholder"))
 
     # ── Process input ─────────────────────────────────────────────────────────
-    audio_bytes   = None
     display_text  = None   # what to show in the user bubble
     message_content = None # what to send to Claude
 
-    if audio_input is not None:
-        # Voice input takes priority
-        audio_bytes     = audio_input.read()
-        display_text    = f"🎤 *{t('agent_voice_label')}*"
-        message_content = _audio_to_user_content(audio_bytes)
-        st.session_state.used_voice = True
+    if st.session_state.pending_prompt:
+        # Starter chip was clicked on the previous run
+        display_text    = st.session_state.pending_prompt
+        message_content = st.session_state.pending_prompt
+        st.session_state.pending_prompt = None
+        st.session_state.used_voice = False
+    elif audio_input is not None:
+        # Voice input: transcribe in Python then send as plain text
+        with st.spinner("🎙️ Transcribing..."):
+            transcript = _transcribe_audio(audio_input.read())
+        if transcript and not transcript.startswith("[transcription error"):
+            display_text    = f"🎤 {transcript}"
+            message_content = transcript
+            st.session_state.used_voice = True
+        else:
+            st.warning("Could not transcribe audio — please try again or type your question.")
     elif user_text:
         display_text    = user_text
         message_content = user_text
@@ -427,10 +442,5 @@ def render_agent_page(t, h, lang: str):
         cols = st.columns(2)
         for i, prompt in enumerate(starters):
             if cols[i % 2].button(prompt, use_container_width=True, key=f"starter_{i}"):
-                # Inject as a text message and rerun
-                st.session_state.chat_messages.append({
-                    "role":         "user",
-                    "content":      prompt,
-                    "display_text": prompt,
-                })
+                st.session_state.pending_prompt = prompt
                 st.rerun()
