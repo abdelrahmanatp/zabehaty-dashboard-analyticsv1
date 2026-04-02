@@ -80,6 +80,8 @@ def load_order_frequency():
                 s_last_order=("created_at", "max"),
             ).reset_index())
         df_live = df_live.merge(synth_agg, on="user_id", how="left")
+        df_live["last_order_recent"] = pd.to_datetime(df_live["last_order_recent"], errors="coerce")
+        df_live["s_last_order"]      = pd.to_datetime(df_live["s_last_order"],      errors="coerce")
         df_live["last_order_recent"] = df_live[["last_order_recent", "s_last_order"]].max(axis=1)
         df_live["recent_order_count"] = df_live["recent_order_count"] + df_live["s_order_count"].fillna(0)
         df_live = df_live.drop(columns=["s_order_count", "s_last_order"])

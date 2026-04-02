@@ -13,6 +13,7 @@ Outputs:
 """
 
 import os, sys, json, time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
 import pandas as pd
@@ -24,7 +25,7 @@ load_dotenv()
 os.makedirs(".tmp", exist_ok=True)
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-MODEL  = "claude-opus-4-6"
+MODEL  = "claude-sonnet-4-6"
 
 
 def read_json(path):
@@ -360,18 +361,34 @@ def run():
     print("Building context from analysis outputs...")
     ctx = build_context()
 
-    # ── English report ────────────────────────────────────────────────────────
-    print("Generating executive summary (EN)...")
-    exec_summary = generate_executive_summary(ctx)
+    tasks = {
+        "exec_summary":       (generate_executive_summary,      ctx),
+        "comm_strategy":      (generate_communication_strategy, ctx),
+        "product_narrative":  (generate_product_narrative,      ctx),
+        "vendor_narrative":   (generate_vendor_narrative,       ctx),
+        "exec_summary_ar":    (generate_executive_summary_ar,   ctx),
+        "comm_strategy_ar":   (generate_communication_strategy_ar, ctx),
+        "product_narrative_ar": (generate_product_narrative_ar, ctx),
+        "vendor_narrative_ar":  (generate_vendor_narrative_ar,  ctx),
+    }
 
-    print("Generating communication strategy (EN)...")
-    comm_strategy = generate_communication_strategy(ctx)
+    print(f"Running {len(tasks)} Claude calls in parallel (Sonnet)...")
+    results = {}
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(fn, arg): name for name, (fn, arg) in tasks.items()}
+        for future in as_completed(futures):
+            name = futures[future]
+            results[name] = future.result()
+            print(f"  ✓ {name}")
 
-    print("Generating product narrative (EN)...")
-    product_narrative = generate_product_narrative(ctx)
-
-    print("Generating vendor narrative (EN)...")
-    vendor_narrative = generate_vendor_narrative(ctx)
+    exec_summary        = results["exec_summary"]
+    comm_strategy       = results["comm_strategy"]
+    product_narrative   = results["product_narrative"]
+    vendor_narrative    = results["vendor_narrative"]
+    exec_summary_ar     = results["exec_summary_ar"]
+    comm_strategy_ar    = results["comm_strategy_ar"]
+    product_narrative_ar = results["product_narrative_ar"]
+    vendor_narrative_ar  = results["vendor_narrative_ar"]
 
     report_en = {
         "executive_summary": exec_summary,
@@ -381,19 +398,6 @@ def run():
     }
     with open(".tmp/narrative_report.json", "w", encoding="utf-8") as f:
         json.dump(report_en, f, indent=2, ensure_ascii=False)
-
-    # ── Arabic report ─────────────────────────────────────────────────────────
-    print("Generating executive summary (AR)...")
-    exec_summary_ar = generate_executive_summary_ar(ctx)
-
-    print("Generating communication strategy (AR)...")
-    comm_strategy_ar = generate_communication_strategy_ar(ctx)
-
-    print("Generating product narrative (AR)...")
-    product_narrative_ar = generate_product_narrative_ar(ctx)
-
-    print("Generating vendor narrative (AR)...")
-    vendor_narrative_ar = generate_vendor_narrative_ar(ctx)
 
     report_ar = {
         "executive_summary": exec_summary_ar,
