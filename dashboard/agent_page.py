@@ -236,39 +236,51 @@ def _run_agent_turn(client: anthropic.Anthropic, messages: list, system: str) ->
 def _strip_markdown(text: str) -> str:
     """Remove markdown symbols so TTS reads clean prose, not formatting."""
     import re
-    # Remove code blocks entirely (``` ... ```)
     text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
-    # Remove inline code (`...`)
     text = re.sub(r"`[^`]*`", "", text)
-    # Remove bold/italic markers
     text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text)
     text = re.sub(r"_{1,3}([^_]+)_{1,3}", r"\1", text)
-    # Remove markdown headers (#, ##, ###)
     text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
-    # Remove bullet/list markers
     text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)
     text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
-    # Remove italic provenance notes: *(Source: ...)*
     text = re.sub(r"\*\(.*?\)\*", "", text)
-    # Remove URLs
+    text = re.sub(r"\(.*?Source:.*?\)", "", text)
     text = re.sub(r"https?://\S+", "", text)
-    # Collapse excess whitespace
     text = re.sub(r"\n+", " ", text)
     text = re.sub(r"  +", " ", text)
     return text.strip()
 
 
-def _speak(text: str, lang: str):
-    """Inject a browser TTS call using the Web Speech API."""
-    bcp_lang  = "ar-AE" if lang == "ar" else "en-US"
-    clean     = _strip_markdown(text)
-    safe_text = clean.replace("\\", "").replace('"', '\\"')[:800]
+def _get_spoken_summary(text: str) -> str:
+    """Extract first 2-3 complete natural sentences for TTS — no tables, no markup."""
+    import re
+    clean = _strip_markdown(text)
+    # Split on sentence boundaries
+    sentences = re.split(r'(?<=[.!?؟])\s+', clean)
+    # Skip lines that look like table rows or numbers-only lines
+    prose = [s for s in sentences if len(s) > 20 and not re.match(r'^[\d,.\s|%-]+$', s)]
+    return " ".join(prose[:3])[:500]
+
+
+def _detect_lang(text: str, default_lang: str) -> str:
+    """Return 'ar' if text contains Arabic characters, else default_lang."""
+    import re
+    return "ar" if re.search(r'[\u0600-\u06FF]', text) else default_lang
+
+
+def _speak(text: str, lang: str, tts_id: str):
+    """Inject a sessionStorage-gated TTS call — safe across Streamlit reruns."""
+    bcp_lang = "ar-AE" if lang == "ar" else "en-US"
+    spoken   = _get_spoken_summary(text).replace("\\", "").replace('"', '\\"')
     js = f"""
     <script>
     (function() {{
+        var id = "{tts_id}";
+        if (sessionStorage.getItem("tts_last_id") === id) return;
+        sessionStorage.setItem("tts_last_id", id);
         if (!('speechSynthesis' in window)) return;
         window.speechSynthesis.cancel();
-        var u = new SpeechSynthesisUtterance("{safe_text}");
+        var u = new SpeechSynthesisUtterance("{spoken}");
         u.lang = "{bcp_lang}";
         u.rate = 0.95;
         window.speechSynthesis.speak(u);
@@ -278,13 +290,14 @@ def _speak(text: str, lang: str):
     st.components.v1.html(js, height=0)
 
 
-def _stop_speaking():
-    """Inject a browser call to cancel any ongoing TTS."""
-    js = """
+def _stop_speaking(stop_id: str):
+    """Write a sentinel to sessionStorage and cancel TTS — persists across reruns."""
+    js = f"""
     <script>
-    (function() {
+    (function() {{
+        sessionStorage.setItem("tts_last_id", "stop_{stop_id}");
         if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-    })();
+    }})();
     </script>
     """
     st.components.v1.html(js, height=0)
@@ -331,6 +344,12 @@ def render_agent_page(t, h, lang: str):
         st.session_state.used_voice = False
     if "pending_prompt" not in st.session_state:
         st.session_state.pending_prompt = None
+    if "tts_id" not in st.session_state:
+        st.session_state.tts_id = 0
+    if "tts_text" not in st.session_state:
+        st.session_state.tts_text = None
+    if "tts_lang" not in st.session_state:
+        st.session_state.tts_lang = lang
 
     client = _get_client()
     system = build_system_prompt()
@@ -342,12 +361,16 @@ def render_agent_page(t, h, lang: str):
         st.caption(t("agent_subtitle"))
     with hcol2:
         if st.button("⏹ Stop", use_container_width=True, help="Stop voice playback"):
-            _stop_speaking()
+            st.session_state.tts_id  += 1
+            st.session_state.tts_text = None
+            _stop_speaking(str(st.session_state.tts_id))
     with hcol3:
         if st.button(t("agent_clear"), use_container_width=True):
             st.session_state.chat_messages = []
             st.session_state.used_voice    = False
-            _stop_speaking()
+            st.session_state.tts_text      = None
+            st.session_state.tts_id       += 1
+            _stop_speaking(str(st.session_state.tts_id))
             st.rerun()
 
     st.divider()
@@ -361,23 +384,37 @@ def render_agent_page(t, h, lang: str):
         )
         with st.chat_message(role):
             st.markdown(content)
-            # Render download button inline for messages that have an Excel file
-            if role == "assistant" and msg.get("excel_bytes"):
-                st.download_button(
-                    label     = t("agent_download_btn"),
-                    data      = msg["excel_bytes"],
-                    file_name = msg.get("excel_filename", "zabehaty_report.xlsx"),
-                    mime      = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key       = f"dl_{i}",
-                )
+            if role == "assistant":
+                # Inline download button
+                if msg.get("excel_bytes"):
+                    st.download_button(
+                        label     = t("agent_download_btn"),
+                        data      = msg["excel_bytes"],
+                        file_name = msg.get("excel_filename", "zabehaty_report.xlsx"),
+                        mime      = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key       = f"dl_{i}",
+                    )
+                # Play audio button — user-initiated TTS only
+                if st.button("🔊", key=f"play_{i}", help="Play audio"):
+                    st.session_state.tts_id  += 1
+                    st.session_state.tts_text = content
+                    st.session_state.tts_lang = _detect_lang(content, lang)
+                    st.rerun()
 
-    # ── Voice input ───────────────────────────────────────────────────────────
-    st.caption(t("agent_voice_label"))
-    audio_input = st.audio_input(
-        label      = "🎤",
-        key        = "agent_audio",
-        label_visibility = "collapsed",
-    )
+    # ── Voice input — CSS-fixed next to the chat input bar ───────────────────
+    st.markdown("""
+    <style>
+    [data-testid="stAudioInput"] {
+        position: fixed;
+        bottom: 10px;
+        right: 72px;
+        z-index: 999;
+        background: transparent;
+    }
+    [data-testid="stAudioInput"] > label { display: none; }
+    </style>
+    """, unsafe_allow_html=True)
+    audio_input = st.audio_input("🎤", key="agent_audio", label_visibility="collapsed")
 
     # ── Text input ────────────────────────────────────────────────────────────
     user_text = st.chat_input(t("agent_placeholder"))
@@ -405,6 +442,8 @@ def render_agent_page(t, h, lang: str):
                 display_text    = f"🎤 {transcript}"
                 message_content = transcript
                 st.session_state.used_voice = True
+                # Detect language from transcript for accurate TTS reply
+                st.session_state.tts_lang = _detect_lang(transcript, lang)
             else:
                 st.warning("Could not transcribe audio — please try again or type your question.")
         else:
@@ -460,9 +499,13 @@ def render_agent_page(t, h, lang: str):
             "excel_filename": "zabehaty_report.xlsx",
         })
 
-        # Voice output — only if user used voice input
-        if st.session_state.used_voice and reply_text:
-            _speak(reply_text, lang)
+    # ── Single TTS renderer — fires only when tts_text is set by Play button ──
+    if st.session_state.get("tts_text"):
+        _speak(
+            st.session_state.tts_text,
+            st.session_state.tts_lang,
+            str(st.session_state.tts_id),
+        )
 
     # ── Starter prompts (shown when conversation is empty) ────────────────────
     if not st.session_state.chat_messages:
