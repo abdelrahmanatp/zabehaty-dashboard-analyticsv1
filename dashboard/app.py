@@ -58,15 +58,6 @@ def _run_pipeline():
 if "pipeline_ready" not in st.session_state:
     st.session_state.pipeline_ready = _pipeline_files_exist()
 
-if not st.session_state.pipeline_ready:
-    with st.spinner("⏳ Loading data for the first time — this takes about 60 seconds…"):
-        try:
-            _run_pipeline()
-            st.session_state.pipeline_ready = True
-        except Exception as _e:
-            st.error(f"Pipeline failed: {_e}. Check DB credentials in Streamlit secrets.")
-            st.stop()
-
 try:
     import matplotlib
     HAS_MATPLOTLIB = True
@@ -88,7 +79,7 @@ TMP  = os.path.join(ROOT, ".tmp")
 # LANGUAGE SYSTEM
 # ══════════════════════════════════════════════════════════════════════════════
 if "lang"     not in st.session_state: st.session_state.lang     = "en"
-if "page_idx" not in st.session_state: st.session_state.page_idx = 0
+if "page_idx" not in st.session_state: st.session_state.page_idx = 0   # 0 = AI Analyst (first in list)
 
 STRINGS = {
     "en": {
@@ -820,6 +811,13 @@ def inject_css():
         [data-testid="stSidebar"] .stRadio [data-testid="stWidgetLabel"] {
             font-size: 13px !important; font-weight: 700 !important; margin-bottom: 2px !important;
         }
+        /* AI Analyst — highlight first nav item */
+        [data-testid="stSidebar"] .stRadio label:first-of-type {
+            background: linear-gradient(90deg, #c0392b18, #c0392b08) !important;
+            border: 1px solid #c0392b55 !important;
+            font-weight: 700 !important;
+            color: #c0392b !important;
+        }
         </style>
         """, unsafe_allow_html=True)
     else:
@@ -838,7 +836,51 @@ def inject_css():
         [data-testid="stSidebar"] .stRadio [data-testid="stWidgetLabel"] {
             font-size: 13px !important; font-weight: 700 !important; margin-bottom: 2px !important;
         }
+        /* AI Analyst — highlight first nav item */
+        [data-testid="stSidebar"] .stRadio label:first-of-type {
+            background: linear-gradient(90deg, #c0392b18, #c0392b08) !important;
+            border: 1px solid #c0392b55 !important;
+            font-weight: 700 !important;
+            color: #c0392b !important;
+        }
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            .block-container { padding: 1rem 0.75rem !important; max-width: 100% !important; }
+            .stDataFrame, .stTable { overflow-x: auto !important; font-size: 12px !important; }
+            .stDataFrame table { min-width: unset !important; width: 100% !important; }
+            .stMetric { min-width: 120px !important; }
+            [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; }
+            [data-testid="stHorizontalBlock"] > div { min-width: 45% !important; flex: 1 1 45% !important; }
+            .js-plotly-plot { max-width: 100% !important; }
+            iframe { max-width: 100% !important; }
+        }
         </style>
+        <script>
+        // Mobile: auto-close sidebar after nav selection
+        (function() {
+            function closeSidebarOnMobile() {
+                if (window.innerWidth > 768) return;
+                var labels = document.querySelectorAll('[data-testid="stSidebar"] .stRadio label');
+                labels.forEach(function(label) {
+                    label.addEventListener('click', function() {
+                        setTimeout(function() {
+                            var closeBtn = document.querySelector('[data-testid="collapsedControl"]');
+                            if (!closeBtn) closeBtn = document.querySelector('button[kind="header"]');
+                            if (closeBtn) closeBtn.click();
+                        }, 300);
+                    });
+                });
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', closeSidebarOnMobile);
+            } else {
+                closeSidebarOnMobile();
+            }
+            // Re-attach after Streamlit rerenders
+            var observer = new MutationObserver(closeSidebarOnMobile);
+            observer.observe(document.body, { childList: true, subtree: true });
+        })();
+        </script>
         """, unsafe_allow_html=True)
 
 # ── Data loading ──────────────────────────────────────────────────────────────
@@ -1004,7 +1046,8 @@ inject_css()
 st.sidebar.divider()
 
 # Page navigation — index-based so it survives language switches
-PAGE_KEYS = ["health", "overview", "segments", "products", "vendors", "patterns", "report", "agent"]
+# Agent is first so it's the default landing page and easiest to reach
+PAGE_KEYS = ["agent", "health", "overview", "segments", "products", "vendors", "patterns", "report"]
 page_opts = [t(f"page_{k}") for k in PAGE_KEYS]
 # Guard: clamp page_idx in case session state is stale from an older page list
 if st.session_state.page_idx >= len(PAGE_KEYS):
@@ -1067,6 +1110,16 @@ st.sidebar.caption(t("data_source"))
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: OVERVIEW
 # ══════════════════════════════════════════════════════════════════════════════
+# ── Lazy pipeline — only run when a data page is accessed, not on agent ───────
+if page_key != "agent" and not st.session_state.pipeline_ready:
+    with st.spinner("⏳ Loading analysis data for the first time — about 60 seconds…"):
+        try:
+            _run_pipeline()
+            st.session_state.pipeline_ready = True
+        except Exception as _e:
+            st.error(f"Pipeline failed: {_e}. Check DB credentials.")
+            st.stop()
+
 if page_key == "overview":
     st.title(t("overview_title"))
     show_period_banner(from_date, to_date, mn, mx)

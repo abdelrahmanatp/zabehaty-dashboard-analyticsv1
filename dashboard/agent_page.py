@@ -13,6 +13,7 @@ Features:
 import os
 import sys
 import json
+import random
 from datetime import date
 
 import streamlit as st
@@ -211,6 +212,42 @@ def _run_agent_turn(client: anthropic.Anthropic, messages: list, system: str) ->
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Voice input (STT only — no TTS output)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _transcribe_audio(audio_bytes: bytes) -> str:
+    """Transcribe audio using Google STT. Tries Arabic first, falls back to English."""
+    try:
+        import io
+        import speech_recognition as sr
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
+            audio_data = recognizer.record(source)
+        try:
+            return recognizer.recognize_google(audio_data, language="ar-AE")
+        except sr.UnknownValueError:
+            try:
+                return recognizer.recognize_google(audio_data, language="en-US")
+            except sr.UnknownValueError:
+                return ""
+    except Exception as e:
+        return f"[transcription error: {e}]"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Spinner messages
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SPINNER_EN = ["Thinking…", "Analyzing data…", "Calculating…", "Validating…",
+               "Querying database…", "Crunching numbers…", "Preparing answer…"]
+_SPINNER_AR = ["جارٍ التفكير…", "جارٍ التحليل…", "جارٍ الحساب…", "جارٍ التحقق…",
+               "جارٍ الاستعلام…", "جارٍ معالجة البيانات…", "جارٍ الإعداد…"]
+
+def _spinner_text(lang: str) -> str:
+    return random.choice(_SPINNER_AR if lang == "ar" else _SPINNER_EN)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main render function
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -220,6 +257,8 @@ def render_agent_page(t, h, lang: str):
         st.session_state.chat_messages = []
     if "pending_prompt" not in st.session_state:
         st.session_state.pending_prompt = None
+    if "last_audio_key" not in st.session_state:
+        st.session_state.last_audio_key = None
 
     client = _get_client()
     system = build_system_prompt()
@@ -254,6 +293,17 @@ def render_agent_page(t, h, lang: str):
                     key       = f"dl_{i}",
                 )
 
+    # ── Voice input (mic → transcribe → text) ────────────────────────────────
+    st.markdown("""
+    <style>
+    [data-testid="stAudioInput"] {
+        position: fixed; bottom: 10px; right: 72px; z-index: 999; background: transparent;
+    }
+    [data-testid="stAudioInput"] > label { display: none; }
+    </style>
+    """, unsafe_allow_html=True)
+    audio_input = st.audio_input("🎤", key="agent_audio", label_visibility="collapsed")
+
     # ── Text input ────────────────────────────────────────────────────────────
     user_text = st.chat_input(t("agent_placeholder"))
 
@@ -265,6 +315,23 @@ def render_agent_page(t, h, lang: str):
         display_text    = st.session_state.pending_prompt
         message_content = st.session_state.pending_prompt
         st.session_state.pending_prompt = None
+    elif audio_input is not None:
+        # Only process if this is a newly recorded clip (avoid re-processing on rerun)
+        audio_id = id(audio_input)
+        if audio_id != st.session_state.last_audio_key:
+            st.session_state.last_audio_key = audio_id
+            try:
+                audio_bytes = audio_input.read()
+            except Exception:
+                audio_bytes = None
+            if audio_bytes:
+                with st.spinner("🎙️ Transcribing…"):
+                    transcript = _transcribe_audio(audio_bytes)
+                if transcript and not transcript.startswith("[transcription error"):
+                    display_text    = f"🎤 {transcript}"
+                    message_content = transcript
+                else:
+                    st.warning("Could not transcribe — please try again or type your question.")
     elif user_text:
         display_text    = user_text
         message_content = user_text
@@ -285,7 +352,7 @@ def render_agent_page(t, h, lang: str):
         ]
 
         with st.chat_message("assistant"):
-            with st.spinner(t("agent_thinking")):
+            with st.spinner(_spinner_text(lang)):
                 try:
                     reply_text, excel_bytes = _run_agent_turn(client, api_messages, system)
                 except Exception as e:
