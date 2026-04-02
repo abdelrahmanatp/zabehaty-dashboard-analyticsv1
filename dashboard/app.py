@@ -818,11 +818,20 @@ def inject_css():
             font-weight: 700 !important;
             color: #c0392b !important;
         }
-        /* ── Mobile ── */
+        /* ── Mobile (Arabic) ── */
         @media (max-width: 768px) {
             .block-container { padding: 0.75rem 0.5rem !important; max-width: 100vw !important; overflow-x: hidden !important; }
             .stApp, .main, .main > div { overflow-x: hidden !important; max-width: 100vw !important; }
-            section[data-testid="stSidebar"] { position: fixed !important; z-index: 999 !important; width: 85vw !important; max-width: 320px !important; }
+            /* Sidebar: RTL direction must not break the overlay — force LTR positioning */
+            section[data-testid="stSidebar"] {
+                position: fixed !important; z-index: 999 !important;
+                width: 85vw !important; max-width: 320px !important;
+                direction: ltr !important; left: 0 !important; right: auto !important;
+            }
+            /* Inner sidebar content stays RTL */
+            section[data-testid="stSidebar"] > div { direction: rtl !important; }
+            /* Main content area must not be offset by sidebar */
+            .main .block-container { margin-left: 0 !important; margin-right: 0 !important; }
             [data-testid="stDataFrame"], [data-testid="stDataFrameResizable"], .stDataFrame, .stTable { overflow-x: auto !important; max-width: 100% !important; font-size: 12px !important; }
             [data-testid="stDataFrame"] table, .stDataFrame table { min-width: unset !important; }
             .js-plotly-plot, .plotly, [data-testid="stPlotlyChart"] { max-width: 100% !important; overflow: hidden !important; }
