@@ -69,7 +69,7 @@ st.set_page_config(
     page_title="Zabehaty Analytics",
     page_icon="🥩",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -818,6 +818,18 @@ def inject_css():
             font-weight: 700 !important;
             color: #c0392b !important;
         }
+        /* ── Mobile ── */
+        @media (max-width: 768px) {
+            .block-container { padding: 0.75rem 0.5rem !important; max-width: 100vw !important; overflow-x: hidden !important; }
+            .stApp, .main, .main > div { overflow-x: hidden !important; max-width: 100vw !important; }
+            section[data-testid="stSidebar"] { position: fixed !important; z-index: 999 !important; width: 85vw !important; max-width: 320px !important; }
+            [data-testid="stDataFrame"], [data-testid="stDataFrameResizable"], .stDataFrame, .stTable { overflow-x: auto !important; max-width: 100% !important; font-size: 12px !important; }
+            [data-testid="stDataFrame"] table, .stDataFrame table { min-width: unset !important; }
+            .js-plotly-plot, .plotly, [data-testid="stPlotlyChart"] { max-width: 100% !important; overflow: hidden !important; }
+            [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; gap: 8px !important; }
+            [data-testid="stHorizontalBlock"] > [data-testid="stVerticalBlock"] { min-width: calc(50% - 8px) !important; flex: 1 1 calc(50% - 8px) !important; }
+            h1 { font-size: 1.4rem !important; } h2 { font-size: 1.2rem !important; } h3 { font-size: 1rem !important; }
+        }
         </style>
         """, unsafe_allow_html=True)
     else:
@@ -843,42 +855,86 @@ def inject_css():
             font-weight: 700 !important;
             color: #c0392b !important;
         }
-        /* Mobile responsiveness */
+        /* ── Mobile responsiveness ── */
         @media (max-width: 768px) {
-            .block-container { padding: 1rem 0.75rem !important; max-width: 100% !important; }
-            .stDataFrame, .stTable { overflow-x: auto !important; font-size: 12px !important; }
-            .stDataFrame table { min-width: unset !important; width: 100% !important; }
-            .stMetric { min-width: 120px !important; }
-            [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; }
-            [data-testid="stHorizontalBlock"] > div { min-width: 45% !important; flex: 1 1 45% !important; }
-            .js-plotly-plot { max-width: 100% !important; }
+            /* Main content: full width, no side padding waste */
+            .block-container {
+                padding: 0.75rem 0.5rem !important;
+                max-width: 100vw !important;
+                width: 100% !important;
+                overflow-x: hidden !important;
+            }
+            /* Prevent any element from causing horizontal scroll */
+            .stApp, .main, .main > div {
+                overflow-x: hidden !important;
+                max-width: 100vw !important;
+            }
+            /* Sidebar: overlay mode — never bleeds into content */
+            section[data-testid="stSidebar"] {
+                position: fixed !important;
+                z-index: 999 !important;
+                width: 85vw !important;
+                max-width: 320px !important;
+            }
+            /* Tables: horizontal scroll within container, don't expand page */
+            [data-testid="stDataFrame"],
+            [data-testid="stDataFrameResizable"],
+            .stDataFrame, .stTable {
+                overflow-x: auto !important;
+                max-width: 100% !important;
+                font-size: 12px !important;
+            }
+            [data-testid="stDataFrame"] table,
+            .stDataFrame table {
+                min-width: unset !important;
+            }
+            /* Plotly charts */
+            .js-plotly-plot, .plotly, [data-testid="stPlotlyChart"] {
+                max-width: 100% !important;
+                overflow: hidden !important;
+            }
+            /* Metric cards: wrap into 2 columns on mobile */
+            [data-testid="stHorizontalBlock"] {
+                flex-wrap: wrap !important;
+                gap: 8px !important;
+            }
+            [data-testid="stHorizontalBlock"] > [data-testid="stVerticalBlock"] {
+                min-width: calc(50% - 8px) !important;
+                flex: 1 1 calc(50% - 8px) !important;
+            }
+            /* Chat input: account for keyboard on mobile */
+            .stChatInput { position: sticky !important; bottom: 0 !important; }
+            /* Prevent iframe overflow */
             iframe { max-width: 100% !important; }
+            /* Smaller headings on mobile */
+            h1 { font-size: 1.4rem !important; }
+            h2 { font-size: 1.2rem !important; }
+            h3 { font-size: 1rem !important; }
         }
         </style>
         <script>
-        // Mobile: auto-close sidebar after nav selection
+        // Mobile: auto-close sidebar after nav item click
         (function() {
-            function closeSidebarOnMobile() {
+            function attachSidebarClose() {
                 if (window.innerWidth > 768) return;
                 var labels = document.querySelectorAll('[data-testid="stSidebar"] .stRadio label');
                 labels.forEach(function(label) {
+                    if (label._mobileCB) return; // already attached
+                    label._mobileCB = true;
                     label.addEventListener('click', function() {
                         setTimeout(function() {
-                            var closeBtn = document.querySelector('[data-testid="collapsedControl"]');
-                            if (!closeBtn) closeBtn = document.querySelector('button[kind="header"]');
-                            if (closeBtn) closeBtn.click();
-                        }, 300);
+                            // Try the collapse button (sidebar header X / chevron)
+                            var btn = document.querySelector('[data-testid="stSidebar"] button')
+                                   || document.querySelector('[data-testid="collapsedControl"]');
+                            if (btn) btn.click();
+                        }, 250);
                     });
                 });
             }
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', closeSidebarOnMobile);
-            } else {
-                closeSidebarOnMobile();
-            }
-            // Re-attach after Streamlit rerenders
-            var observer = new MutationObserver(closeSidebarOnMobile);
+            // Run on load and after every Streamlit rerender
+            var observer = new MutationObserver(attachSidebarClose);
             observer.observe(document.body, { childList: true, subtree: true });
+            attachSidebarClose();
         })();
         </script>
         """, unsafe_allow_html=True)
