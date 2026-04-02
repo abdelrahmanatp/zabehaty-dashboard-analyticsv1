@@ -289,10 +289,6 @@ def render_agent_page(t, h, lang: str):
     # ── Session state init ────────────────────────────────────────────────────
     if "chat_messages" not in st.session_state:
         st.session_state.chat_messages = []
-    if "pending_download" not in st.session_state:
-        st.session_state.pending_download = None
-    if "pending_filename" not in st.session_state:
-        st.session_state.pending_filename = "zabehaty_report.xlsx"
     if "used_voice" not in st.session_state:
         st.session_state.used_voice = False
     if "pending_prompt" not in st.session_state:
@@ -308,34 +304,30 @@ def render_agent_page(t, h, lang: str):
         st.caption(t("agent_subtitle"))
     with hcol2:
         if st.button(t("agent_clear"), use_container_width=True):
-            st.session_state.chat_messages    = []
-            st.session_state.pending_download = None
-            st.session_state.used_voice       = False
+            st.session_state.chat_messages = []
+            st.session_state.used_voice    = False
             st.rerun()
-
-    # ── Download button (shown when a report is ready) ────────────────────────
-    if st.session_state.pending_download is not None:
-        st.success(t("agent_download_ready"))
-        st.download_button(
-            label     = t("agent_download_btn"),
-            data      = st.session_state.pending_download,
-            file_name = st.session_state.pending_filename,
-            mime      = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
 
     st.divider()
 
     # ── Chat history ──────────────────────────────────────────────────────────
-    for msg in st.session_state.chat_messages:
+    for i, msg in enumerate(st.session_state.chat_messages):
         role = msg["role"]
-        # Content can be str (text) or list (multimodal — show text parts only)
         content = msg.get("display_text") or (
             msg["content"] if isinstance(msg["content"], str) else
             " ".join(b["text"] for b in msg["content"] if isinstance(b, dict) and b.get("type") == "text")
         )
         with st.chat_message(role):
             st.markdown(content)
+            # Render download button inline for messages that have an Excel file
+            if role == "assistant" and msg.get("excel_bytes"):
+                st.download_button(
+                    label     = t("agent_download_btn"),
+                    data      = msg["excel_bytes"],
+                    file_name = msg.get("excel_filename", "zabehaty_report.xlsx"),
+                    mime      = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key       = f"dl_{i}",
+                )
 
     # ── Voice input ───────────────────────────────────────────────────────────
     st.caption(t("agent_voice_label"))
@@ -408,20 +400,23 @@ def render_agent_page(t, h, lang: str):
                     excel_bytes = None
 
             st.markdown(reply_text)
+            if excel_bytes:
+                st.download_button(
+                    label     = t("agent_download_btn"),
+                    data      = excel_bytes,
+                    file_name = "zabehaty_report.xlsx",
+                    mime      = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key       = f"dl_new",
+                )
 
-        # Save assistant reply
+        # Save assistant reply (store excel_bytes so the button persists on re-render)
         st.session_state.chat_messages.append({
             "role":         "assistant",
             "content":      reply_text,
             "display_text": reply_text,
+            "excel_bytes":  excel_bytes,
+            "excel_filename": "zabehaty_report.xlsx",
         })
-
-        # Store Excel if generated
-        if excel_bytes:
-            st.session_state.pending_download = excel_bytes
-            # Derive filename from the last export_excel_report call if possible
-            st.session_state.pending_filename = "zabehaty_report.xlsx"
-            st.rerun()   # re-render to show download button
 
         # Voice output — only if user used voice input
         if st.session_state.used_voice and reply_text:
