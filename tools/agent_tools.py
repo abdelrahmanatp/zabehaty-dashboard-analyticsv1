@@ -531,7 +531,68 @@ def get_revenue_per_user(date_from: str = None, date_to: str = None) -> dict:
     }
 
 
-# ─── 16. Forecast ────────────────────────────────────────────────────────────
+# ─── 16. Cancellation stats ──────────────────────────────────────────────────
+
+def get_cancellation_stats(date_from: str = None, date_to: str = None) -> dict:
+    """
+    Cancelled order volume, cancellation rate, and top cancellation reasons
+    for a given date range. Queries live DB — not limited to delivered orders.
+    """
+    if not date_from or not date_to:
+        date_from, date_to = _month_bounds()
+
+    sql_summary = """
+        SELECT
+            COUNT(*)                                          AS total_orders,
+            SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END)      AS cancelled_orders,
+            SUM(CASE WHEN status = 3
+                      AND payment_status = 'completed'
+                THEN 1 ELSE 0 END)                            AS delivered_orders,
+            ROUND(
+                100.0 * SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END)
+                / NULLIF(COUNT(*), 0)
+            , 2)                                              AS cancellation_rate_pct,
+            SUM(CASE WHEN status = 2 THEN total ELSE 0 END)  AS cancelled_gmv
+        FROM orders
+        WHERE DATE(created_at) BETWEEN %(d1)s AND %(d2)s
+    """
+
+    sql_reasons = """
+        SELECT
+            COALESCE(cancel_reason, 'Not specified')  AS reason,
+            COUNT(*)                                  AS count
+        FROM orders
+        WHERE status = 2
+          AND DATE(created_at) BETWEEN %(d1)s AND %(d2)s
+        GROUP BY cancel_reason
+        ORDER BY count DESC
+        LIMIT 10
+    """
+
+    params = {"d1": date_from, "d2": date_to}
+    df_s = query_df(sql_summary, params=params)
+    df_r = query_df(sql_reasons, params=params)
+
+    row = df_s.iloc[0].to_dict() if not df_s.empty else {}
+    reasons = df_r.to_dict(orient="records") if not df_r.empty else []
+
+    return {
+        "data": {
+            "total_orders":          int(row.get("total_orders") or 0),
+            "cancelled_orders":      int(row.get("cancelled_orders") or 0),
+            "delivered_orders":      int(row.get("delivered_orders") or 0),
+            "cancellation_rate_pct": float(row.get("cancellation_rate_pct") or 0),
+            "cancelled_gmv_aed":     round(float(row.get("cancelled_gmv") or 0), 2),
+            "top_reasons":           reasons,
+        },
+        "source":  "orders table, replica_uae database (live query)",
+        "filters": f"DATE(created_at) BETWEEN {date_from} AND {date_to}; status=2 for cancellations",
+        "formula": "cancellation_rate = COUNT(status=2) / COUNT(all orders) × 100",
+        "sql":     sql_summary.strip(),
+    }
+
+
+# ─── 17. Forecast ────────────────────────────────────────────────────────────
 
 def forecast_metric(metric: str = "revenue", periods: int = 4, period_unit: str = "weeks") -> dict:
     """
@@ -889,6 +950,17 @@ TOOL_DEFINITIONS = [
         },
     },
     {
+        "name": "get_cancellation_stats",
+        "description": "Get cancelled order count, cancellation rate %, cancelled GMV, and top cancellation reasons for a date range. Covers ALL orders (not just delivered), so it answers questions like 'how many orders were cancelled?' or 'what is our cancellation rate?'",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date_from": {"type": "string", "description": "Start date YYYY-MM-DD (default: start of current month)"},
+                "date_to":   {"type": "string", "description": "End date YYYY-MM-DD (default: today)"},
+            },
+        },
+    },
+    {
         "name": "export_excel_report",
         "description": "Build and return an Excel report with the requested columns for a date range. Supported columns include: new_buyers, phone_users, first_orders, repeat_orders, total_orders, total_revenue, revenue_per_user, aov, customers, top_shops, top_products, user_segments, churn_stats, ltv_stats, category_performance, payment_methods.",
         "input_schema": {
@@ -923,6 +995,7 @@ TOOL_FN_MAP = {
     "get_peak_timing":         get_peak_timing,
     "get_bcg_summary":         get_bcg_summary,
     "get_revenue_per_user":    get_revenue_per_user,
+    "get_cancellation_stats":  get_cancellation_stats,
     "forecast_metric":         forecast_metric,
     "export_excel_report":     export_excel_report,
 }
