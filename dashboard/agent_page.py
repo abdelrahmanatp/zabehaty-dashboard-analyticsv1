@@ -186,8 +186,10 @@ def _run_agent_turn(client: anthropic.Anthropic, messages: list, system: str) ->
         messages=windowed,
     )
 
-    # Agentic loop — keep going while Claude wants to use tools
-    while response.stop_reason == "tool_use":
+    # Agentic loop — keep going while Claude wants to use tools (max 8 iterations)
+    iterations = 0
+    while response.stop_reason == "tool_use" and iterations < 8:
+        iterations += 1
         tool_results = []
 
         for block in response.content:
@@ -214,6 +216,9 @@ def _run_agent_turn(client: anthropic.Anthropic, messages: list, system: str) ->
             tools=TOOL_DEFINITIONS,
             messages=windowed,
         )
+
+    if iterations >= 8 and response.stop_reason == "tool_use":
+        return "I was unable to complete this request after several attempts. Please try rephrasing your question.", excel_bytes
 
     # Extract final text
     final_text = ""
@@ -355,14 +360,21 @@ def render_agent_page(t, h, lang: str):
         st.session_state.used_voice = False
     elif audio_input is not None:
         # Voice input: transcribe in Python then send as plain text
-        with st.spinner("🎙️ Transcribing..."):
-            transcript = _transcribe_audio(audio_input.read())
-        if transcript and not transcript.startswith("[transcription error"):
-            display_text    = f"🎤 {transcript}"
-            message_content = transcript
-            st.session_state.used_voice = True
+        try:
+            audio_bytes = audio_input.read()
+        except Exception:
+            audio_bytes = None
+        if audio_bytes:
+            with st.spinner("🎙️ Transcribing..."):
+                transcript = _transcribe_audio(audio_bytes)
+            if transcript and not transcript.startswith("[transcription error"):
+                display_text    = f"🎤 {transcript}"
+                message_content = transcript
+                st.session_state.used_voice = True
+            else:
+                st.warning("Could not transcribe audio — please try again or type your question.")
         else:
-            st.warning("Could not transcribe audio — please try again or type your question.")
+            st.warning("Could not read audio — please try again.")
     elif user_text:
         display_text    = user_text
         message_content = user_text
