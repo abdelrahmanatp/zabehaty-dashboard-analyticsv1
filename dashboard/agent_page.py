@@ -233,10 +233,36 @@ def _run_agent_turn(client: anthropic.Anthropic, messages: list, system: str) ->
 # Voice helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _strip_markdown(text: str) -> str:
+    """Remove markdown symbols so TTS reads clean prose, not formatting."""
+    import re
+    # Remove code blocks entirely (``` ... ```)
+    text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+    # Remove inline code (`...`)
+    text = re.sub(r"`[^`]*`", "", text)
+    # Remove bold/italic markers
+    text = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", text)
+    text = re.sub(r"_{1,3}([^_]+)_{1,3}", r"\1", text)
+    # Remove markdown headers (#, ##, ###)
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+    # Remove bullet/list markers
+    text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
+    # Remove italic provenance notes: *(Source: ...)*
+    text = re.sub(r"\*\(.*?\)\*", "", text)
+    # Remove URLs
+    text = re.sub(r"https?://\S+", "", text)
+    # Collapse excess whitespace
+    text = re.sub(r"\n+", " ", text)
+    text = re.sub(r"  +", " ", text)
+    return text.strip()
+
+
 def _speak(text: str, lang: str):
     """Inject a browser TTS call using the Web Speech API."""
     bcp_lang  = "ar-AE" if lang == "ar" else "en-US"
-    safe_text = text.replace("`", "").replace("\\", "").replace('"', '\\"').replace("\n", " ")[:600]
+    clean     = _strip_markdown(text)
+    safe_text = clean.replace("\\", "").replace('"', '\\"')[:800]
     js = f"""
     <script>
     (function() {{
@@ -247,6 +273,18 @@ def _speak(text: str, lang: str):
         u.rate = 0.95;
         window.speechSynthesis.speak(u);
     }})();
+    </script>
+    """
+    st.components.v1.html(js, height=0)
+
+
+def _stop_speaking():
+    """Inject a browser call to cancel any ongoing TTS."""
+    js = """
+    <script>
+    (function() {
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    })();
     </script>
     """
     st.components.v1.html(js, height=0)
@@ -298,14 +336,18 @@ def render_agent_page(t, h, lang: str):
     system = build_system_prompt()
 
     # ── Header row ────────────────────────────────────────────────────────────
-    hcol1, hcol2 = st.columns([3, 1])
+    hcol1, hcol2, hcol3 = st.columns([3, 1, 1])
     with hcol1:
         st.title(t("agent_title"))
         st.caption(t("agent_subtitle"))
     with hcol2:
+        if st.button("⏹ Stop", use_container_width=True, help="Stop voice playback"):
+            _stop_speaking()
+    with hcol3:
         if st.button(t("agent_clear"), use_container_width=True):
             st.session_state.chat_messages = []
             st.session_state.used_voice    = False
+            _stop_speaking()
             st.rerun()
 
     st.divider()
