@@ -84,17 +84,35 @@ Today's date: {today}
 YOUR ROLE:
 - Answer stakeholder questions about business performance in plain language
 - Detect the language of every user message and reply in the SAME language (Arabic or English)
-- When you give a number, ALWAYS state: where the data came from, what filters were applied, and how it was calculated
-- If asked "how did you get that?" or "كيف حسبت ذلك؟" — quote the exact source, filters, and formula from the last tool result you used
 - Be confident and direct — speak like a senior analyst briefing a board, not hedging
 
 TOOLS:
 You have access to live data tools. Use them to answer questions precisely.
 Always prefer calling a tool over guessing from memory.
 
-PROVENANCE FORMAT:
-After each number, include a small italic note like:
-*(Source: orders table · Filters: status=delivered, March 2026 · Formula: COUNT(DISTINCT id))*
+PROVENANCE FORMAT — CRITICAL:
+After every answer that contains a number from a tool, append a collapsible data-validation block using this EXACT HTML structure (do not use markdown italic notes):
+
+<details>
+<summary>📊 Data Source & Query</summary>
+
+**Source:** [value from tool result source field]
+**Filters:** [value from tool result filters field]
+**Formula:** [value from tool result formula field]
+**SQL Query:**
+```sql
+[value from tool result sql field — paste it verbatim]
+```
+
+</details>
+
+Rules:
+- Always include this block after every numeric answer, even simple ones
+- The SQL must be the exact query from the tool result's sql field — never paraphrase it
+- If a single answer uses multiple tools, include one <details> block per tool
+- If the tool returned no sql field, write "Pre-computed — see pipeline tool"
+- Do NOT add any other provenance notation (no inline italic notes)
+- The block is collapsed by default — stakeholders won't see it unless they click
 
 EXCEL REPORTS:
 When asked to generate a report or export data, call export_excel_report.
@@ -113,7 +131,6 @@ LANGUAGE:
 - Use formal Gulf Arabic (الفصحى التجارية) not colloquial
 
 NEVER:
-- Reveal raw SQL to users unless they explicitly ask "show me the query"
 - Make up numbers without calling a tool
 - Say "it seems" or "it appears" — be direct
 """
@@ -152,6 +169,7 @@ def _run_tool(name: str, inputs: dict) -> tuple[str, bytes | None]:
         "source":  result.get("source", ""),
         "filters": result.get("filters", ""),
         "formula": result.get("formula", ""),
+        "sql":     result.get("sql", ""),
     }
     if result.get("error"):
         payload["error"] = result["error"]
@@ -285,7 +303,7 @@ def render_agent_page(t, h, lang: str):
             " ".join(b["text"] for b in msg["content"] if isinstance(b, dict) and b.get("type") == "text")
         )
         with st.chat_message(role):
-            st.markdown(content)
+            st.markdown(content, unsafe_allow_html=True)
             if role == "assistant" and msg.get("excel_bytes"):
                 st.download_button(
                     label     = t("agent_download_btn"),
@@ -298,6 +316,28 @@ def render_agent_page(t, h, lang: str):
     # ── Voice input (mic → transcribe → text) ────────────────────────────────
     st.markdown("""
     <style>
+    /* ── Collapsible provenance block ── */
+    details {
+        margin-top: 8px;
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        padding: 0;
+        background: #f9f9f9;
+        font-size: 0.82rem;
+    }
+    details summary {
+        cursor: pointer;
+        padding: 5px 10px;
+        color: #555;
+        font-weight: 500;
+        list-style: none;
+        user-select: none;
+    }
+    details summary::-webkit-details-marker { display: none; }
+    details[open] summary { border-bottom: 1px solid #e0e0e0; }
+    details > *:not(summary) { padding: 8px 12px; }
+    details pre { font-size: 0.78rem; background: #f0f0f0; border-radius: 4px; padding: 8px; overflow-x: auto; }
+
     /* Pin the audio input widget next to the chat input bar */
     [data-testid="stAudioInput"] {
         position: fixed !important;
@@ -387,7 +427,7 @@ def render_agent_page(t, h, lang: str):
                     reply_text  = f"⚠️ Error: {e}"
                     excel_bytes = None
 
-            st.markdown(reply_text)
+            st.markdown(reply_text, unsafe_allow_html=True)
             if excel_bytes:
                 st.download_button(
                     label     = t("agent_download_btn"),
