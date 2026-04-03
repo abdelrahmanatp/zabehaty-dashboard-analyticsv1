@@ -264,14 +264,16 @@ def render_agent_page(t, h, lang: str):
     system = build_system_prompt()
 
     # ── Header ────────────────────────────────────────────────────────────────
-    hcol1, hcol2 = st.columns([4, 1])
+    hcol1, hcol2 = st.columns([8, 1])
     with hcol1:
         st.title(t("agent_title"))
         st.caption(t("agent_subtitle"))
     with hcol2:
-        if st.button(t("agent_clear"), use_container_width=True):
-            st.session_state.chat_messages = []
-            st.rerun()
+        # Only show trash icon when there is an active conversation
+        if st.session_state.chat_messages:
+            if st.button("🗑️", key="clear_conv", help=t("agent_clear")):
+                st.session_state.chat_messages = []
+                st.rerun()
 
     st.divider()
 
@@ -296,10 +298,36 @@ def render_agent_page(t, h, lang: str):
     # ── Voice input (mic → transcribe → text) ────────────────────────────────
     st.markdown("""
     <style>
+    /* Pin the audio input widget next to the chat input bar */
     [data-testid="stAudioInput"] {
-        position: fixed; bottom: 10px; right: 72px; z-index: 999; background: transparent;
+        position: fixed !important;
+        bottom: 8px !important;
+        right: 70px !important;
+        z-index: 999 !important;
+        width: 48px !important;
+        height: 48px !important;
+        overflow: hidden !important;
+        background: transparent !important;
     }
-    [data-testid="stAudioInput"] > label { display: none; }
+    /* Hide label */
+    [data-testid="stAudioInput"] > label { display: none !important; }
+    /* Constrain inner wrapper to clip the 00:00 timer */
+    [data-testid="stAudioInput"] > div {
+        width: 48px !important;
+        height: 48px !important;
+        overflow: hidden !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 0 !important;
+    }
+    /* Hide the timer text (00:00) — target common Streamlit patterns */
+    [data-testid="stAudioInput"] time,
+    [data-testid="stAudioInput"] [class*="time"],
+    [data-testid="stAudioInput"] [class*="duration"],
+    [data-testid="stAudioInput"] [class*="timer"],
+    [data-testid="stAudioInput"] > div > span,
+    [data-testid="stAudioInput"] > div > p { display: none !important; }
     </style>
     """, unsafe_allow_html=True)
     audio_input = st.audio_input("🎤", key="agent_audio", label_visibility="collapsed")
