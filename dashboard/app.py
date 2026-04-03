@@ -827,9 +827,14 @@ def inject_css():
                 position: fixed !important; z-index: 999 !important;
                 width: 85vw !important; max-width: 320px !important;
                 direction: ltr !important; left: 0 !important; right: auto !important;
+                height: 100vh !important; overflow-y: auto !important;
+                -webkit-overflow-scrolling: touch !important;
             }
-            /* Inner sidebar content stays RTL */
-            section[data-testid="stSidebar"] > div { direction: rtl !important; }
+            /* Inner sidebar content stays RTL and scrollable */
+            section[data-testid="stSidebar"] > div {
+                direction: rtl !important;
+                height: 100% !important; overflow-y: auto !important;
+            }
             /* Main content area must not be offset by sidebar */
             .main .block-container { margin-left: 0 !important; margin-right: 0 !important; }
             [data-testid="stDataFrame"], [data-testid="stDataFrameResizable"], .stDataFrame, .stTable { overflow-x: auto !important; max-width: 100% !important; font-size: 12px !important; }
@@ -878,12 +883,19 @@ def inject_css():
                 overflow-x: hidden !important;
                 max-width: 100vw !important;
             }
-            /* Sidebar: overlay mode — never bleeds into content */
+            /* Sidebar: overlay mode — never bleeds into content, fully scrollable */
             section[data-testid="stSidebar"] {
                 position: fixed !important;
                 z-index: 999 !important;
                 width: 85vw !important;
                 max-width: 320px !important;
+                height: 100vh !important;
+                overflow-y: auto !important;
+                -webkit-overflow-scrolling: touch !important;
+            }
+            section[data-testid="stSidebar"] > div {
+                height: 100% !important;
+                overflow-y: auto !important;
             }
             /* Tables: horizontal scroll within container, don't expand page */
             [data-testid="stDataFrame"],
