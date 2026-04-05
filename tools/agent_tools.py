@@ -1007,25 +1007,33 @@ def get_cross_sell_opportunities(limit: int = 10) -> dict:
     for pair in pairs[:limit]:
         cat_a     = pair.get("category_a", "")
         cat_b     = pair.get("category_b", "")
+        cat_a_ar  = pair.get("category_a_ar", cat_a)
+        cat_b_ar  = pair.get("category_b_ar", cat_b)
         co_buyers = int(pair.get("co_buyers", 0))
         affinity  = round(co_buyers / total_buyers * 100, 2)
 
         if co_buyers >= 4000:
-            offer = f"Bundle {cat_a} + {cat_b} — 15% off both categories. Estimated reach: {co_buyers:,} customers."
+            offer    = f"Bundle {cat_a} + {cat_b} — 15% off both categories. Estimated reach: {co_buyers:,} customers."
+            offer_ar = f"باقة {cat_a_ar} + {cat_b_ar} — خصم 15% على الفئتين. الوصول المتوقع: {co_buyers:,} عميل."
         elif co_buyers >= 2000:
-            offer = f"Cross-sell: offer 10% off {cat_b} to every {cat_a} buyer at checkout."
+            offer    = f"Cross-sell: offer 10% off {cat_b} to every {cat_a} buyer at checkout."
+            offer_ar = f"بيع متقاطع: قدّم خصم 10% على {cat_b_ar} لكل مشتري من {cat_a_ar} عند الدفع."
         else:
-            offer = f"Promote {cat_b} to {cat_a} buyers with a 5% loyalty coupon."
+            offer    = f"Promote {cat_b} to {cat_a} buyers with a 5% loyalty coupon."
+            offer_ar = f"روّج لـ{cat_b_ar} لمشتري {cat_a_ar} بكوبون ولاء 5%."
 
         enriched.append({
-            "category_a":       cat_a,
-            "category_b":       cat_b,
-            "co_buyers":        co_buyers,
-            "affinity_pct":     affinity,
-            "suggested_offer":  offer,
-            "best_send_day":    best_day,
-            "best_send_time":   f"{best_hr}:00",
-            "estimated_reach":  co_buyers,
+            "category_a":        cat_a,
+            "category_b":        cat_b,
+            "category_a_ar":     cat_a_ar,
+            "category_b_ar":     cat_b_ar,
+            "co_buyers":         co_buyers,
+            "affinity_pct":      affinity,
+            "suggested_offer":   offer,
+            "suggested_offer_ar": offer_ar,
+            "best_send_day":     best_day,
+            "best_send_time":    f"{best_hr}:00",
+            "estimated_reach":   co_buyers,
         })
 
     return {
@@ -1127,14 +1135,15 @@ def get_customer_buying_profile(user_id: int) -> dict:
     """
     sql_cats = """
         SELECT
-            c.name                          AS category_name,
-            COUNT(DISTINCT uto.order_id)    AS purchase_count,
-            SUM(uto.total)                  AS category_spend,
-            AVG(uto.total)                  AS avg_order_value
+            COALESCE(c.name_en, c.name)             AS category_name,
+            COALESCE(c.name_ar, c.name_en, c.name)  AS category_name_ar,
+            COUNT(DISTINCT uto.order_id)             AS purchase_count,
+            SUM(uto.total)                           AS category_spend,
+            AVG(uto.total)                           AS avg_order_value
         FROM user_total_orders uto
         LEFT JOIN categories c ON uto.category_id = c.id
         WHERE uto.user_id = %(uid)s
-        GROUP BY c.name
+        GROUP BY c.name_en, c.name_ar, c.name
         ORDER BY category_spend DESC
         LIMIT 5
     """
@@ -1154,6 +1163,7 @@ def get_customer_buying_profile(user_id: int) -> dict:
         for _, row in df_cats.iterrows():
             categories.append({
                 "category":        str(row.get("category_name", "")),
+                "category_ar":     str(row.get("category_name_ar", row.get("category_name", ""))),
                 "orders":          int(row.get("purchase_count", 0)),
                 "total_spend_aed": round(float(row.get("category_spend", 0)), 2),
                 "avg_order_aed":   round(float(row.get("avg_order_value", 0)), 2),
@@ -1213,16 +1223,18 @@ def generate_promo_campaign(
         # Per-user buying profile (live query)
         try:
             profile = get_customer_buying_profile(uid)["data"]
-            top_cats    = [c["category"] for c in profile.get("top_categories", [])][:2]
+            top_cats    = [c["category"]    for c in profile.get("top_categories", [])][:2]
+            top_cats_ar = [c.get("category_ar", c["category"]) for c in profile.get("top_categories", [])][:2]
             send_hour   = profile.get("preferred_order_hour", default_hour)
             send_day    = profile.get("best_send_day", default_day)
         except Exception:
             top_cats    = []
+            top_cats_ar = []
             send_hour   = default_hour
             send_day    = default_day
 
-        cat_text_en = " & ".join(top_cats) if top_cats else "your favorite products"
-        cat_text_ar = " و ".join(top_cats) if top_cats else "منتجاتك المفضلة"
+        cat_text_en = " & ".join(top_cats)    if top_cats    else "your favorite products"
+        cat_text_ar = " و ".join(top_cats_ar) if top_cats_ar else "منتجاتك المفضلة"
 
         # Offer details by tier
         offers = {

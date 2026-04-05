@@ -29,6 +29,7 @@ def load_user_orders():
             uto.user_id,
             uto.category_id,
             c.name_en          AS category_name,
+            COALESCE(c.name_ar, c.name_en) AS category_name_ar,
             uto.total          AS spend,
             uto.created_at,
             uto.updated_at
@@ -96,14 +97,16 @@ def repeat_purchase_analysis(df_hist):
 def cross_category_affinity(df_hist):
     """
     Which categories are most often bought together by the same user.
-    Returns top 15 category pairs by co-occurrence count.
+    Returns top 15 category pairs by co-occurrence count, with both
+    English and Arabic category names.
     """
-    user_cats = df_hist.groupby('user_id')['category_name'].apply(
+    # Build English pairs
+    user_cats_en = df_hist.groupby('user_id')['category_name'].apply(
         lambda x: list(x.dropna().unique())
     ).reset_index()
 
     pair_counts = {}
-    for cats in user_cats['category_name']:
+    for cats in user_cats_en['category_name']:
         if len(cats) >= 2:
             for pair in combinations(sorted(cats), 2):
                 pair_counts[pair] = pair_counts.get(pair, 0) + 1
@@ -112,6 +115,21 @@ def cross_category_affinity(df_hist):
         [(k[0], k[1], v) for k, v in pair_counts.items()],
         columns=['category_a', 'category_b', 'co_buyers']
     ).sort_values('co_buyers', ascending=False).head(15)
+
+    # Build English→Arabic name map from the loaded data
+    if 'category_name_ar' in df_hist.columns:
+        name_map = (
+            df_hist[['category_name', 'category_name_ar']]
+            .dropna(subset=['category_name'])
+            .drop_duplicates('category_name')
+            .set_index('category_name')['category_name_ar']
+            .to_dict()
+        )
+        pairs_df['category_a_ar'] = pairs_df['category_a'].map(name_map).fillna(pairs_df['category_a'])
+        pairs_df['category_b_ar'] = pairs_df['category_b'].map(name_map).fillna(pairs_df['category_b'])
+    else:
+        pairs_df['category_a_ar'] = pairs_df['category_a']
+        pairs_df['category_b_ar'] = pairs_df['category_b']
 
     return pairs_df
 
