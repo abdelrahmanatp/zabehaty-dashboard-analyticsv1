@@ -845,6 +845,13 @@ def inject_css():
             h1 { font-size: 1.4rem !important; } h2 { font-size: 1.2rem !important; } h3 { font-size: 1rem !important; }
         }
         </style>
+        <script>
+        /* Set dir="rtl" as a DOM attribute (not just CSS) so JS mic detection works */
+        (function() {
+            document.documentElement.setAttribute('dir', 'rtl');
+            document.body.setAttribute('dir', 'rtl');
+        })();
+        </script>
         """, unsafe_allow_html=True)
     else:
         st.markdown("""

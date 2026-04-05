@@ -1413,41 +1413,60 @@ def get_lost_users_winback(min_revenue: float = 2000, limit: int = 50) -> dict:
     }
 
 
-def _winback_tactic(days_inactive: int, ltv: float, categories: str, patterns: dict) -> str:
-    """Generate a personalised win-back tactic string based on user profile."""
+def _winback_tactic(days_inactive: int, ltv: float, categories: str, patterns: dict, lang: str = "en") -> str:
+    """Generate a personalised win-back tactic string — Arabic or English based on lang."""
     cats = [c.strip() for c in str(categories).split(",") if c.strip()]
 
-    # Timing recommendation from buying_patterns
+    # Timing from buying_patterns — try both key formats
     peak_days  = patterns.get("order_timing", {}).get("peak_days", [])
     peak_hours = patterns.get("order_timing", {}).get("peak_hours", [])
-    best_day   = peak_days[0]["day"]  if peak_days  else "Thursday"
-    best_hour  = peak_hours[0]["hour"] if peak_hours else "13"
-    timing     = f"Send on {best_day} around {best_hour}:00"
+    best_day_en  = peak_days[0].get("day_name",  peak_days[0].get("day",  "Thursday")) if peak_days else "Thursday"
+    best_hour    = peak_hours[0].get("hour_of_day", peak_hours[0].get("hour", 13))       if peak_hours else 13
 
-    # Category-specific hook
-    cat_hook = f"featuring {cats[0]}" if cats else "with a personalized offer"
-
-    # Value-based offer tier
-    if ltv >= 10000:
-        offer = "VIP reactivation: exclusive 20% discount + free delivery on next order"
-    elif ltv >= 5000:
-        offer = "Premium win-back: 15% discount on next order + loyalty points bonus"
-    elif ltv >= 2000:
-        offer = "Standard win-back: 10% discount coupon valid 7 days"
+    if lang == "ar":
+        day_map = {"Sunday":"الأحد","Monday":"الاثنين","Tuesday":"الثلاثاء",
+                   "Wednesday":"الأربعاء","Thursday":"الخميس","Friday":"الجمعة","Saturday":"السبت"}
+        best_day = day_map.get(best_day_en, best_day_en)
+        timing   = f"الإرسال يوم {best_day} حوالي الساعة {best_hour:02d}:00"
+        cat_hook = f"مع عرض على {cats[0]}" if cats else "بعرض مخصص"
+        if ltv >= 10000:
+            offer = "إعادة تفعيل VIP: خصم حصري 20% + توصيل مجاني على الطلب القادم"
+        elif ltv >= 5000:
+            offer = "استعادة بريميوم: خصم 15% على الطلب القادم + نقاط ولاء مضاعفة"
+        elif ltv >= 2000:
+            offer = "استعادة قياسية: كوبون خصم 10% صالح لمدة 7 أيام"
+        else:
+            offer = "إعادة تفاعل: خصم 5% أو توصيل مجاني على الطلب القادم"
+        if days_inactive > 365:
+            urgency = "عاجل جداً — العميل على وشك الخسارة الدائمة؛ جرّب حملة أخيرة"
+        elif days_inactive > 180:
+            urgency = "عاجل — أرسل خلال 7 أيام أو تخاطر بخسارته نهائياً"
+        elif days_inactive > 90:
+            urgency = "متوسط الأولوية — نافذة الاستعادة لا تزال مفتوحة"
+        else:
+            urgency = "أولوية منخفضة — تدخل مبكر، فرصة جيدة للاستعادة"
+        return f"{offer} | الحملة {cat_hook} | {timing} | {urgency}"
     else:
-        offer = "Re-engagement: 5% discount or free delivery on next order"
-
-    # Urgency based on recency
-    if days_inactive > 365:
-        urgency = "High urgency — user likely churned permanently; try one final campaign"
-    elif days_inactive > 180:
-        urgency = "High urgency — send within 7 days or risk permanent loss"
-    elif days_inactive > 90:
-        urgency = "Medium urgency — reactivation window still open"
-    else:
-        urgency = "Low urgency — early intervention, good recovery odds"
-
-    return f"{offer} | Campaign {cat_hook} | {timing} | {urgency}"
+        best_day = best_day_en
+        timing   = f"Send on {best_day} around {best_hour:02d}:00"
+        cat_hook = f"featuring {cats[0]}" if cats else "with a personalized offer"
+        if ltv >= 10000:
+            offer = "VIP reactivation: exclusive 20% discount + free delivery on next order"
+        elif ltv >= 5000:
+            offer = "Premium win-back: 15% discount on next order + loyalty points bonus"
+        elif ltv >= 2000:
+            offer = "Standard win-back: 10% discount coupon valid 7 days"
+        else:
+            offer = "Re-engagement: 5% discount or free delivery on next order"
+        if days_inactive > 365:
+            urgency = "High urgency — user likely churned permanently; try one final campaign"
+        elif days_inactive > 180:
+            urgency = "High urgency — send within 7 days or risk permanent loss"
+        elif days_inactive > 90:
+            urgency = "Medium urgency — reactivation window still open"
+        else:
+            urgency = "Low urgency — early intervention, good recovery odds"
+        return f"{offer} | Campaign {cat_hook} | {timing} | {urgency}"
 
 
 # ─── Tool registry (for Claude tool_use schema) ──────────────────────────────

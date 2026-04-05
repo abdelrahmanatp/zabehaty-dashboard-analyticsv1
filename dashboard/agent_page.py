@@ -586,20 +586,28 @@ def render_agent_page(t, h, lang: str):
             st.markdown("**💡 أسئلة مقترحة:**")
             starters = [
                 "كم عدد الطلبات هذا الشهر؟",
-                "ما هي الإيرادات المتوقعة في الأسبوعين القادمين؟",
-                "أعطني تقريراً عن الربع الأول 2026 بإكسل",
-                "ما هي أكثر المتاجر مبيعاً؟",
+                "ما متوسط القيمة الحياتية للعميل؟",
+                "أعطني تقريراً شاملاً عن الستة أشهر الماضية بإكسل",
+                "ما هي أفضل فرص البيع المتقاطع لزيادة مبيعاتنا؟",
+                "من هم عملاؤنا الأكثر قيمة وما الأفضل لاستهدافهم؟",
+                "أنشئ حملة واتساب مخصصة لأفضل عملائنا",
+                "من هم العملاء الذين فقدناهم وكيف نستعيدهم؟",
                 "كم عدد العملاء في خطر الانقطاع؟",
+                "ما هي الإيرادات المتوقعة في الأسبوعين القادمين؟",
                 "كيف توزع المستخدمون على الشرائح؟",
             ]
         else:
             st.markdown("**💡 Suggested questions:**")
             starters = [
                 "How many orders did we get this month?",
-                "How much revenue should we expect in the next 2 weeks?",
-                "Make me a Q1 2026 Excel report with: new buyers, repeat orders, total revenue, revenue per user",
+                "What is our average customer LTV?",
+                "Give me a full business performance report for the last 6 months as Excel",
+                "What are the top cross-selling opportunities to boost sales?",
+                "Generate a personalised WhatsApp promo campaign for our top customers",
+                "Who are our lost high-value customers and how do we win them back?",
                 "Which shops are performing best this month?",
                 "How many users are at churn risk?",
+                "What revenue should we expect in the next 2 weeks?",
                 "What's the breakdown of user segments?",
             ]
 
