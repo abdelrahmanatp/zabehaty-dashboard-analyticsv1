@@ -275,8 +275,6 @@ def render_agent_page(t, h, lang: str):
         st.session_state.chat_messages = []
     if "pending_prompt" not in st.session_state:
         st.session_state.pending_prompt = None
-    if "last_audio_key" not in st.session_state:
-        st.session_state.last_audio_key = None
 
     client = _get_client()
     system = build_system_prompt()
@@ -313,79 +311,175 @@ def render_agent_page(t, h, lang: str):
                     key       = f"dl_{i}",
                 )
 
-    # ── Voice input (mic → transcribe → text) ────────────────────────────────
+    # ── CSS: collapsible provenance blocks ───────────────────────────────────
     st.markdown("""
     <style>
-    /* ── Collapsible provenance block ── */
     details {
-        margin-top: 8px;
-        border: 1px solid #e0e0e0;
-        border-radius: 6px;
-        padding: 0;
-        background: #f9f9f9;
-        font-size: 0.82rem;
+        margin-top: 8px; border: 1px solid #e0e0e0; border-radius: 6px;
+        padding: 0; background: #f9f9f9; font-size: 0.82rem;
     }
     details summary {
-        cursor: pointer;
-        padding: 5px 10px;
-        color: #555;
-        font-weight: 500;
-        list-style: none;
-        user-select: none;
+        cursor: pointer; padding: 5px 10px; color: #555;
+        font-weight: 500; list-style: none; user-select: none;
     }
     details summary::-webkit-details-marker { display: none; }
     details[open] summary { border-bottom: 1px solid #e0e0e0; }
     details > *:not(summary) { padding: 8px 12px; }
     details pre { font-size: 0.78rem; background: #f0f0f0; border-radius: 4px; padding: 8px; overflow-x: auto; }
-
-    /* ── Mic icon: layered inside the chat input row, right of textarea, left of send ── */
-
-    /* 1. Shrink & position the audio widget over the chat input's right interior */
-    [data-testid="stAudioInput"] {
-        position: fixed !important;
-        bottom: 10px !important;
-        right: 54px !important;   /* sits just left of the send/arrow button (~50px wide) */
-        z-index: 1000 !important;
-        width: 36px !important;
-        height: 36px !important;
-        overflow: hidden !important;
-        background: transparent !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        border: none !important;
-        box-shadow: none !important;
-    }
-    /* Hide label */
-    [data-testid="stAudioInput"] > label { display: none !important; }
-    /* Clip inner wrapper to exactly the button area */
-    [data-testid="stAudioInput"] > div {
-        width: 36px !important;
-        height: 36px !important;
-        overflow: hidden !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        gap: 0 !important;
-        padding: 0 !important;
-        background: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-    }
-    /* Hide the timer text (00:00) — target all common Streamlit patterns */
-    [data-testid="stAudioInput"] time,
-    [data-testid="stAudioInput"] [class*="time"],
-    [data-testid="stAudioInput"] [class*="duration"],
-    [data-testid="stAudioInput"] [class*="timer"],
-    [data-testid="stAudioInput"] > div > span,
-    [data-testid="stAudioInput"] > div > p { display: none !important; }
-
-    /* 2. Push textarea text left so it doesn't slide under the mic or send button */
-    [data-testid="stChatInput"] textarea {
-        padding-right: 96px !important;
-    }
     </style>
     """, unsafe_allow_html=True)
-    audio_input = st.audio_input("🎤", key="agent_audio", label_visibility="collapsed")
+
+    # ── Mic button injected into the chat-input DOM via JavaScript ────────────
+    # CSS positioning can never reliably place a separate Streamlit widget
+    # *inside* another component's container. The only real solution is to use
+    # JavaScript to physically insert a button element into the chat input DOM,
+    # then use the browser's Web Speech API for transcription — no server round
+    # trip, no separate widget, the button is literally part of the input bar.
+    st.components.v1.html("""
+    <script>
+    (function() {
+        var MIC_ID = 'zab-injected-mic';
+        var listening = false;
+        var recognition = null;
+
+        function setupRecognition(btn) {
+            var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SR) { btn.title = 'Speech recognition not supported in this browser'; btn.style.opacity='0.3'; return; }
+
+            recognition = new SR();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+
+            recognition.onstart = function() {
+                listening = true;
+                btn.textContent = '🔴';
+                btn.title = 'Recording… tap to stop';
+                btn.style.opacity = '1';
+            };
+            recognition.onend = function() {
+                listening = false;
+                btn.textContent = '🎤';
+                btn.title = 'Tap to speak';
+                btn.style.opacity = '0.7';
+            };
+            recognition.onerror = function(e) {
+                listening = false;
+                btn.textContent = '🎤';
+                btn.style.opacity = '0.7';
+            };
+            recognition.onresult = function(event) {
+                var transcript = event.results[0][0].transcript;
+                // Write transcript into the Streamlit chat textarea and trigger React update
+                var chatContainer = document.querySelector('[data-testid="stChatInput"]');
+                if (!chatContainer) return;
+                var textarea = chatContainer.querySelector('textarea');
+                if (!textarea) return;
+                var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+                nativeSetter.call(textarea, transcript);
+                textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                textarea.dispatchEvent(new Event('change', { bubbles: true }));
+                textarea.focus();
+            };
+        }
+
+        function injectMic() {
+            // Walk up through the iframe boundary to the top-level document
+            var topDoc = window.parent ? window.parent.document : document;
+            var chatContainer = topDoc.querySelector('[data-testid="stChatInput"]');
+            if (!chatContainer) { setTimeout(injectMic, 400); return; }
+            if (topDoc.getElementById(MIC_ID)) return; // already injected
+
+            // Find the send button so we can insert before it
+            var sendBtn = chatContainer.querySelector('button[kind="primaryFormSubmit"], button[data-testid="stChatInputSubmitButton"], button');
+
+            var mic = topDoc.createElement('button');
+            mic.id = MIC_ID;
+            mic.type = 'button';
+            mic.textContent = '🎤';
+            mic.title = 'Tap to speak';
+            mic.style.cssText = [
+                'background:none',
+                'border:none',
+                'cursor:pointer',
+                'font-size:20px',
+                'line-height:1',
+                'padding:4px 6px',
+                'margin:0 2px',
+                'border-radius:6px',
+                'opacity:0.7',
+                'transition:opacity 0.15s',
+                'flex-shrink:0',
+                'align-self:center',
+                'display:inline-flex',
+                'align-items:center',
+                'justify-content:center',
+            ].join(';');
+
+            mic.onmouseenter = function() { this.style.opacity='1'; };
+            mic.onmouseleave = function() { if(!listening) this.style.opacity='0.7'; };
+
+            // Detect language from page direction for STT
+            var lang = (topDoc.documentElement.dir === 'rtl' || topDoc.body.dir === 'rtl') ? 'ar-AE' : 'en-US';
+
+            mic.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!recognition) { setupRecognitionTop(mic, topDoc, lang); }
+                if (listening) {
+                    recognition.stop();
+                } else {
+                    try { recognition.lang = lang; recognition.start(); }
+                    catch(err) { recognition = null; }
+                }
+            });
+
+            if (sendBtn) {
+                chatContainer.insertBefore(mic, sendBtn);
+            } else {
+                chatContainer.appendChild(mic);
+            }
+        }
+
+        function setupRecognitionTop(btn, topDoc, lang) {
+            var topWin = window.parent || window;
+            var SR = topWin.SpeechRecognition || topWin.webkitSpeechRecognition;
+            if (!SR) { btn.title='Not supported'; btn.style.opacity='0.3'; return; }
+            recognition = new SR();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = lang;
+            recognition.onstart = function() { listening=true; btn.textContent='🔴'; btn.title='Recording… tap to stop'; btn.style.opacity='1'; };
+            recognition.onend = function() { listening=false; btn.textContent='🎤'; btn.title='Tap to speak'; btn.style.opacity='0.7'; };
+            recognition.onerror = function(e) { listening=false; btn.textContent='🎤'; btn.style.opacity='0.7'; };
+            recognition.onresult = function(event) {
+                var transcript = event.results[0][0].transcript;
+                var chatContainer = topDoc.querySelector('[data-testid="stChatInput"]');
+                if (!chatContainer) return;
+                var textarea = chatContainer.querySelector('textarea');
+                if (!textarea) return;
+                var nativeSetter = Object.getOwnPropertyDescriptor(topWin.HTMLTextAreaElement.prototype, 'value').set;
+                nativeSetter.call(textarea, transcript);
+                textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                textarea.dispatchEvent(new Event('change', { bubbles: true }));
+                textarea.focus();
+            };
+        }
+
+        // Re-inject after every Streamlit rerender (MutationObserver on parent doc)
+        try {
+            var topDoc = window.parent ? window.parent.document : document;
+            injectMic();
+            var observer = new MutationObserver(function() {
+                if (!topDoc.getElementById(MIC_ID)) injectMic();
+            });
+            observer.observe(topDoc.body, { childList: true, subtree: true });
+        } catch(e) {
+            // Cross-origin fallback: inject into local iframe doc
+            injectMic();
+        }
+    })();
+    </script>
+    """, height=0)
 
     # ── Text input ────────────────────────────────────────────────────────────
     user_text = st.chat_input(t("agent_placeholder"))
@@ -398,23 +492,6 @@ def render_agent_page(t, h, lang: str):
         display_text    = st.session_state.pending_prompt
         message_content = st.session_state.pending_prompt
         st.session_state.pending_prompt = None
-    elif audio_input is not None:
-        # Only process if this is a newly recorded clip (avoid re-processing on rerun)
-        audio_id = id(audio_input)
-        if audio_id != st.session_state.last_audio_key:
-            st.session_state.last_audio_key = audio_id
-            try:
-                audio_bytes = audio_input.read()
-            except Exception:
-                audio_bytes = None
-            if audio_bytes:
-                with st.spinner("🎙️ Transcribing…"):
-                    transcript = _transcribe_audio(audio_bytes)
-                if transcript and not transcript.startswith("[transcription error"):
-                    display_text    = f"🎤 {transcript}"
-                    message_content = transcript
-                else:
-                    st.warning("Could not transcribe — please try again or type your question.")
     elif user_text:
         display_text    = user_text
         message_content = user_text
