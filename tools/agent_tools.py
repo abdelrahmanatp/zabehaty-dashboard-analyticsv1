@@ -835,6 +835,35 @@ def export_excel_report(
         if pay_data:
             sheets["Payment Methods"] = pd.DataFrame(pay_data)
 
+    # --- BCG Matrix ---
+    if _want("bcg", "matrix", "product_matrix", "bcg_matrix"):
+        bcg_df = _tmp("bcg_matrix.csv")
+        if not bcg_df.empty and "bcg_quadrant" in bcg_df.columns:
+            keep_cols = [c for c in ["product_name", "category_name", "shop_name",
+                                     "total_revenue", "growth_rate", "avg_margin",
+                                     "total_units", "total_orders", "bcg_quadrant"]
+                         if c in bcg_df.columns]
+            for quadrant in ["Star", "Cash Cow", "Question Mark", "Dog"]:
+                qdf = bcg_df[bcg_df["bcg_quadrant"] == quadrant][keep_cols]
+                if not qdf.empty:
+                    sheets[f"BCG {quadrant}s"] = qdf.sort_values("total_revenue",
+                                                                   ascending=False).head(50)
+        else:
+            # Fallback: use get_bcg_summary
+            bcg_summary = get_bcg_summary()["data"]
+            if bcg_summary:
+                sheets["BCG Summary"] = pd.DataFrame([
+                    {"Quadrant": k, **v} for k, v in bcg_summary.items()
+                    if isinstance(v, dict)
+                ])
+
+    # --- Lost users win-back (for customer behaviour deep-dives) ---
+    if _want("lost_users", "win_back", "winback", "churn_users", "customer_behavior",
+             "customer_behaviour", "behavior", "behaviour"):
+        lost_data = get_lost_users_winback(min_revenue=2000, limit=50)["data"]
+        if lost_data:
+            sheets["Lost Users Win-Back"] = pd.DataFrame(lost_data)
+
     # --- Build Excel in memory ---
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
@@ -863,6 +892,165 @@ def export_excel_report(
         "formula": "Each sheet uses the corresponding tool function — see individual tool provenance",
         "sql":     "See individual tool functions for SQL",
     }
+
+
+# ─── 18. Lost high-value users + win-back tactics ────────────────────────────
+
+def get_lost_users_winback(min_revenue: float = 2000, limit: int = 50) -> dict:
+    """
+    Returns lost users (RFM Segment='Lost') who generated significant revenue,
+    with their buying profile and personalised win-back tactics.
+    Uses rfm_scores.csv + churn_risk.csv + buying_patterns.json.
+    Falls back to a live SQL query if .tmp files are unavailable.
+    """
+    df_rfm   = _tmp("rfm_scores.csv")
+    df_churn = _tmp("churn_risk.csv")
+    patterns = _tmp("buying_patterns.json")
+
+    # ── Live SQL fallback ────────────────────────────────────────────────────
+    if df_rfm.empty:
+        sql = """
+            SELECT
+                o.user_id,
+                COUNT(DISTINCT o.id)            AS total_orders,
+                SUM(o.total)                    AS lifetime_value,
+                MAX(o.created_at)               AS last_order_date,
+                DATEDIFF(NOW(), MAX(o.created_at)) AS days_inactive,
+                GROUP_CONCAT(
+                    DISTINCT c.name ORDER BY c.name SEPARATOR ', '
+                )                               AS categories
+            FROM orders o
+            LEFT JOIN order_details od ON od.order_id = o.id
+            LEFT JOIN products p       ON p.id = od.product_id
+            LEFT JOIN categories c     ON c.id = p.category_id
+            WHERE o.status = 3
+              AND o.payment_status = 'completed'
+            GROUP BY o.user_id
+            HAVING days_inactive > 90
+               AND lifetime_value >= %(min_rev)s
+            ORDER BY lifetime_value DESC
+            LIMIT %(lim)s
+        """
+        df_live = query_df(sql, params={"min_rev": min_revenue, "lim": limit})
+        if df_live.empty:
+            return {"data": [], "source": "orders table", "filters": "no lost high-value users found",
+                    "formula": "days_inactive > 90 AND lifetime_value >= threshold",
+                    "sql": sql.strip()}
+
+        records = []
+        for _, row in df_live.iterrows():
+            days = int(row.get("days_inactive", 0))
+            ltv  = round(float(row.get("lifetime_value", 0)), 2)
+            cats = str(row.get("categories", ""))
+            records.append({
+                "user_id":         int(row["user_id"]),
+                "lifetime_value":  ltv,
+                "total_orders":    int(row.get("total_orders", 0)),
+                "days_inactive":   days,
+                "last_order_date": str(row.get("last_order_date", "")),
+                "categories":      cats,
+                "tactic":          _winback_tactic(days, ltv, cats, patterns),
+            })
+        return {
+            "data":    records,
+            "source":  "orders + order_details + categories tables, replica_uae",
+            "filters": f"status=3, payment_status='completed', days_inactive>90, LTV>={min_revenue}",
+            "formula": "lifetime value = SUM(total); inactive = days since last delivered order",
+            "sql":     sql.strip(),
+        }
+
+    # ── Use pre-computed .tmp files ──────────────────────────────────────────
+    # Identify lost users
+    segment_col = next((c for c in ["Segment", "segment", "rfm_segment"] if c in df_rfm.columns), None)
+    monetary_col = next((c for c in ["monetary", "lifetime_value", "total_spend"] if c in df_rfm.columns), None)
+
+    if segment_col and monetary_col:
+        lost = df_rfm[
+            (df_rfm[segment_col].str.lower().str.contains("lost", na=False)) &
+            (df_rfm[monetary_col] >= min_revenue)
+        ].copy()
+    elif monetary_col:
+        # No segment column — use recency as proxy (haven't ordered in 90+ days)
+        recency_col = next((c for c in ["recency", "recency_days", "days_inactive"] if c in df_rfm.columns), None)
+        if recency_col:
+            lost = df_rfm[
+                (df_rfm[recency_col] > 90) &
+                (df_rfm[monetary_col] >= min_revenue)
+            ].copy()
+        else:
+            lost = df_rfm[df_rfm[monetary_col] >= min_revenue].copy()
+    else:
+        return {"data": [], "source": ".tmp/rfm_scores.csv",
+                "filters": "could not identify segment or monetary columns",
+                "formula": "n/a", "sql": "pre-computed"}
+
+    lost = lost.nlargest(limit, monetary_col)
+
+    # Merge churn risk score if available
+    if not df_churn.empty and "user_id" in df_churn.columns and "user_id" in lost.columns:
+        churn_cols = [c for c in ["user_id", "churn_risk_label", "churn_risk_score", "days_inactive"]
+                      if c in df_churn.columns]
+        lost = lost.merge(df_churn[churn_cols], on="user_id", how="left")
+
+    records = []
+    for _, row in lost.iterrows():
+        days = int(row.get("days_inactive", row.get("recency", row.get("recency_days", 0))))
+        ltv  = round(float(row.get(monetary_col, 0)), 2)
+        cats = str(row.get("categories", row.get("top_categories", row.get("category_name", ""))))
+        records.append({
+            "user_id":         int(row.get("user_id", 0)),
+            "lifetime_value_aed": ltv,
+            "total_orders":    int(row.get("frequency", row.get("total_orders", 0))),
+            "days_inactive":   days,
+            "churn_risk":      str(row.get("churn_risk_label", "Lost")),
+            "top_categories":  cats,
+            "tactic":          _winback_tactic(days, ltv, cats, patterns),
+        })
+
+    return {
+        "data":    records,
+        "source":  ".tmp/rfm_scores.csv + .tmp/churn_risk.csv",
+        "filters": f"Segment='Lost', LTV >= AED {min_revenue}, top {limit} by lifetime value",
+        "formula": "RFM Segment: Lost = low recency + low frequency; ordered by lifetime monetary value",
+        "sql":     "pre-computed from .tmp/rfm_scores.csv",
+    }
+
+
+def _winback_tactic(days_inactive: int, ltv: float, categories: str, patterns: dict) -> str:
+    """Generate a personalised win-back tactic string based on user profile."""
+    cats = [c.strip() for c in str(categories).split(",") if c.strip()]
+
+    # Timing recommendation from buying_patterns
+    peak_days  = patterns.get("order_timing", {}).get("peak_days", [])
+    peak_hours = patterns.get("order_timing", {}).get("peak_hours", [])
+    best_day   = peak_days[0]["day"]  if peak_days  else "Thursday"
+    best_hour  = peak_hours[0]["hour"] if peak_hours else "13"
+    timing     = f"Send on {best_day} around {best_hour}:00"
+
+    # Category-specific hook
+    cat_hook = f"featuring {cats[0]}" if cats else "with a personalized offer"
+
+    # Value-based offer tier
+    if ltv >= 10000:
+        offer = "VIP reactivation: exclusive 20% discount + free delivery on next order"
+    elif ltv >= 5000:
+        offer = "Premium win-back: 15% discount on next order + loyalty points bonus"
+    elif ltv >= 2000:
+        offer = "Standard win-back: 10% discount coupon valid 7 days"
+    else:
+        offer = "Re-engagement: 5% discount or free delivery on next order"
+
+    # Urgency based on recency
+    if days_inactive > 365:
+        urgency = "High urgency — user likely churned permanently; try one final campaign"
+    elif days_inactive > 180:
+        urgency = "High urgency — send within 7 days or risk permanent loss"
+    elif days_inactive > 90:
+        urgency = "Medium urgency — reactivation window still open"
+    else:
+        urgency = "Low urgency — early intervention, good recovery odds"
+
+    return f"{offer} | Campaign {cat_hook} | {timing} | {urgency}"
 
 
 # ─── Tool registry (for Claude tool_use schema) ──────────────────────────────
@@ -1015,15 +1203,26 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "export_excel_report",
-        "description": "Build and return an Excel report with the requested columns for a date range. Supported columns include: new_buyers, phone_users, first_orders, repeat_orders, total_orders, total_revenue, revenue_per_user, aov, customers, top_shops, top_products, user_segments, churn_stats, ltv_stats, category_performance, payment_methods.",
+        "description": "Build and return an Excel report with the requested columns for a date range. Supported columns include: new_buyers, phone_users, first_orders, repeat_orders, total_orders, total_revenue, revenue_per_user, aov, customers, top_shops, top_products, user_segments, churn_stats, ltv_stats, category_performance, payment_methods, bcg, bcg_matrix, lost_users, win_back, customer_behavior. Pass 'all' or 'core' in columns to include every available sheet. You MUST calculate date_from/date_to when the user says 'last N months' or 'last N weeks' — do not leave them blank.",
         "input_schema": {
             "type": "object",
             "required": ["columns"],
             "properties": {
-                "columns":     {"type": "array", "items": {"type": "string"}, "description": "List of metric names to include"},
-                "date_from":   {"type": "string", "description": "Start date YYYY-MM-DD"},
-                "date_to":     {"type": "string", "description": "End date YYYY-MM-DD"},
+                "columns":     {"type": "array", "items": {"type": "string"}, "description": "List of metric/sheet names. Use 'all' or 'core' for everything. Use 'bcg' for BCG matrix. Use 'lost_users' or 'customer_behavior' for win-back sheet."},
+                "date_from":   {"type": "string", "description": "Start date YYYY-MM-DD. REQUIRED when user specifies a time range like 'last 6 months'. Calculate it before calling this tool."},
+                "date_to":     {"type": "string", "description": "End date YYYY-MM-DD. REQUIRED when user specifies a time range. Use today's date when not specified."},
                 "report_name": {"type": "string", "description": "Base filename for the download (no extension)"},
+            },
+        },
+    },
+    {
+        "name": "get_lost_users_winback",
+        "description": "Get a list of lost/churned users who previously generated significant revenue, with their buying profile and a personalised win-back tactic for each user. Use this when asked about lost customers, churned users, win-back campaigns, or re-engagement strategies.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "min_revenue": {"type": "number", "description": "Minimum lifetime revenue (AED) to include a user. Default 2000."},
+                "limit":       {"type": "integer", "description": "Max number of users to return. Default 50."},
             },
         },
     },
@@ -1051,6 +1250,7 @@ TOOL_FN_MAP = {
     "get_cancellation_stats":  get_cancellation_stats,
     "forecast_metric":         forecast_metric,
     "export_excel_report":     export_excel_report,
+    "get_lost_users_winback":  get_lost_users_winback,
 }
 
 
