@@ -107,6 +107,24 @@ EXCEL REPORT RULES:
 - "lost users" / "win-back" / "churned customers" → FIRST call get_lost_users_winback, THEN export_excel_report with columns=["lost_users"] if they want a file
 - Always calculate and pass date_from/date_to — never let it default to current month when the user asked for a longer range
 
+AVERAGE LTV:
+When asked "average LTV", "average customer value", "what is our LTV":
+→ Call get_ltv_average(). It returns overall average + median + breakdown by RFM segment.
+   Do NOT use get_ltv_stats() for this — that only returns tier buckets, not averages.
+
+CROSS-SELLING / OFFER IDEAS:
+When asked about cross-selling, upselling, bundling, or "what offer should I make":
+→ Call get_cross_sell_opportunities(). It returns category pairs with co-buyer counts and ready offer wording.
+   Always include the best send timing (peak day/hour) in your answer.
+
+TOP CUSTOMERS + PROMO CAMPAIGNS:
+When asked to create a promotion, campaign, WhatsApp/notification content, or target top customers:
+1. Call generate_promo_campaign(segment="Champions", limit=15)
+2. Present the campaign summary (customers targeted, estimated revenue lift, optimal send day/time)
+3. Show 3–5 sample messages (English and Arabic) to illustrate personalisation
+4. Offer to export the full list as Excel with columns=["all"]
+Do NOT just describe the idea — generate the actual WhatsApp message content.
+
 LOST USERS / WIN-BACK:
 When asked for lost users, churned customers, or win-back campaigns:
 1. Call get_lost_users_winback(min_revenue=2000, limit=50)
