@@ -338,36 +338,51 @@ def render_agent_page(t, h, lang: str):
     details > *:not(summary) { padding: 8px 12px; }
     details pre { font-size: 0.78rem; background: #f0f0f0; border-radius: 4px; padding: 8px; overflow-x: auto; }
 
-    /* Pin the audio input widget next to the chat input bar */
+    /* ── Mic icon: layered inside the chat input row, right of textarea, left of send ── */
+
+    /* 1. Shrink & position the audio widget over the chat input's right interior */
     [data-testid="stAudioInput"] {
         position: fixed !important;
-        bottom: 8px !important;
-        right: 70px !important;
-        z-index: 999 !important;
-        width: 48px !important;
-        height: 48px !important;
+        bottom: 10px !important;
+        right: 54px !important;   /* sits just left of the send/arrow button (~50px wide) */
+        z-index: 1000 !important;
+        width: 36px !important;
+        height: 36px !important;
         overflow: hidden !important;
         background: transparent !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
     }
     /* Hide label */
     [data-testid="stAudioInput"] > label { display: none !important; }
-    /* Constrain inner wrapper to clip the 00:00 timer */
+    /* Clip inner wrapper to exactly the button area */
     [data-testid="stAudioInput"] > div {
-        width: 48px !important;
-        height: 48px !important;
+        width: 36px !important;
+        height: 36px !important;
         overflow: hidden !important;
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
         gap: 0 !important;
+        padding: 0 !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
     }
-    /* Hide the timer text (00:00) — target common Streamlit patterns */
+    /* Hide the timer text (00:00) — target all common Streamlit patterns */
     [data-testid="stAudioInput"] time,
     [data-testid="stAudioInput"] [class*="time"],
     [data-testid="stAudioInput"] [class*="duration"],
     [data-testid="stAudioInput"] [class*="timer"],
     [data-testid="stAudioInput"] > div > span,
     [data-testid="stAudioInput"] > div > p { display: none !important; }
+
+    /* 2. Push textarea text left so it doesn't slide under the mic or send button */
+    [data-testid="stChatInput"] textarea {
+        padding-right: 96px !important;
+    }
     </style>
     """, unsafe_allow_html=True)
     audio_input = st.audio_input("🎤", key="agent_audio", label_visibility="collapsed")
