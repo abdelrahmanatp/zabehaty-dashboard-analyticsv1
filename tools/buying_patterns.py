@@ -28,8 +28,8 @@ def load_user_orders():
         SELECT
             uto.user_id,
             uto.category_id,
-            c.name_en          AS category_name,
-            COALESCE(c.name_ar, c.name_en) AS category_name_ar,
+            COALESCE(c.name_en, c.name) AS category_name,
+            c.name                      AS category_name_ar,
             uto.total          AS spend,
             uto.created_at,
             uto.updated_at
@@ -268,7 +268,11 @@ def run():
     print(f"  Avg categories per user: {repeat_stats['avg_categories_per_user']}")
 
     print("\n=== TOP CATEGORY PAIRS ===")
-    print(df_affinity.head(8).to_string(index=False))
+    for _, row in df_affinity.head(8).iterrows():
+        try:
+            print(f"  {row['category_a']} ({row.get('category_a_ar','')}) + {row['category_b']} ({row.get('category_b_ar','')}) — {row['co_buyers']} co-buyers")
+        except Exception:
+            print(f"  {row['category_a']} + {row['category_b']} — {row['co_buyers']} co-buyers")
 
     print("\n=== CHURN RISK ===")
     print(df_churn['churn_risk_label'].value_counts().to_string())

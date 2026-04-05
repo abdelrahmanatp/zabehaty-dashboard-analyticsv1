@@ -1135,15 +1135,15 @@ def get_customer_buying_profile(user_id: int) -> dict:
     """
     sql_cats = """
         SELECT
-            COALESCE(c.name_en, c.name)             AS category_name,
-            COALESCE(c.name_ar, c.name_en, c.name)  AS category_name_ar,
+            COALESCE(c.name_en, c.name) AS category_name,
+            c.name                      AS category_name_ar,
             COUNT(DISTINCT uto.order_id)             AS purchase_count,
             SUM(uto.total)                           AS category_spend,
             AVG(uto.total)                           AS avg_order_value
         FROM user_total_orders uto
         LEFT JOIN categories c ON uto.category_id = c.id
         WHERE uto.user_id = %(uid)s
-        GROUP BY c.name_en, c.name_ar, c.name
+        GROUP BY c.name_en, c.name
         ORDER BY category_spend DESC
         LIMIT 5
     """
