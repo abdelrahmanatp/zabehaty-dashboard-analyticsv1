@@ -41,6 +41,43 @@ def _tmp(name):
     return None
 
 
+def _fetch_user_info(user_ids: list) -> dict:
+    """
+    Fetch full name and mobile for a list of user IDs from the user table.
+    Returns {user_id: {"name": str, "mobile": str}}.
+    """
+    if not user_ids:
+        return {}
+    ids_str = ",".join(str(int(uid)) for uid in set(user_ids) if uid)
+    if not ids_str:
+        return {}
+    sql = f"""
+        SELECT
+            id AS user_id,
+            TRIM(CONCAT_WS(' ', first_name, last_name)) AS full_name,
+            CASE
+                WHEN country_code IS NOT NULL AND country_code != ''
+                THEN CONCAT(country_code, mobile)
+                ELSE mobile
+            END AS mobile
+        FROM user
+        WHERE id IN ({ids_str})
+    """
+    try:
+        df = query_df(sql)
+    except Exception:
+        return {}
+    if df.empty:
+        return {}
+    result = {}
+    for _, row in df.iterrows():
+        result[int(row["user_id"])] = {
+            "name":   str(row.get("full_name", "") or "").strip(),
+            "mobile": str(row.get("mobile", "") or "").strip(),
+        }
+    return result
+
+
 def _today():
     return date.today()
 
@@ -1077,6 +1114,11 @@ def get_top_customers(segment: str = "Champions", limit: int = 20) -> dict:
                 "last_order_date":  str(row.get("last_order_date", row.get("last_active", ""))),
                 "offer_tier":       _offer_tier(ltv),
             })
+        user_info = _fetch_user_info([r["user_id"] for r in records])
+        for r in records:
+            info = user_info.get(r["user_id"], {})
+            r["name"]   = info.get("name", "")
+            r["mobile"] = info.get("mobile", "")
         return {
             "data":    records,
             "source":  ".tmp/rfm_scores.csv",
@@ -1109,6 +1151,11 @@ def get_top_customers(segment: str = "Champions", limit: int = 20) -> dict:
             "last_order_date":   str(row.get("last_order_date", "")),
             "offer_tier":        _offer_tier(ltv),
         })
+    user_info = _fetch_user_info([r["user_id"] for r in records])
+    for r in records:
+        info = user_info.get(r["user_id"], {})
+        r["name"]   = info.get("name", "")
+        r["mobile"] = info.get("mobile", "")
     return {
         "data":    records,
         "source":  "orders table, replica_uae",
@@ -1176,15 +1223,19 @@ def get_customer_buying_profile(user_id: int) -> dict:
     peak_days = patterns.get("order_timing", {}).get("peak_days", [])
     best_day  = peak_days[0].get("day_name", peak_days[0].get("day", "Thursday")) if peak_days else "Thursday"
 
+    user_info = _fetch_user_info([user_id]).get(user_id, {})
+
     return {
         "data": {
             "user_id":              user_id,
+            "name":                 user_info.get("name", ""),
+            "mobile":               user_info.get("mobile", ""),
             "top_categories":       categories,
             "preferred_order_hour": preferred_hour,
             "best_send_day":        best_day,
             "best_send_time":       f"{preferred_hour:02d}:00",
         },
-        "source":  "user_total_orders + orders tables, replica_uae",
+        "source":  "user_total_orders + orders + user tables, replica_uae",
         "filters": f"user_id = {user_id}; status=3, payment_status='completed'",
         "formula": "top categories by SUM(total); preferred hour by MODE(HOUR(created_at))",
         "sql":     sql_cats.strip(),
@@ -1269,8 +1320,11 @@ def generate_promo_campaign(
         # Revenue lift: LTV × 35% conv rate × ~20% repeat order bump
         lift = round(ltv * 0.35 * 0.20, 2)
 
+        uinfo = cust  # name/mobile already on cust from get_top_customers enrichment
         campaign.append({
             "user_id":              uid,
+            "name":                 cust.get("name", ""),
+            "mobile":               cust.get("mobile", ""),
             "segment":              cust.get("segment", segment),
             "lifetime_value_aed":   ltv,
             "offer_tier":           tier,
@@ -1360,6 +1414,11 @@ def get_lost_users_winback(min_revenue: float = 2000, limit: int = 50) -> dict:
                 "categories":      cats,
                 "tactic":          _winback_tactic(days, ltv, cats, patterns),
             })
+        user_info = _fetch_user_info([r["user_id"] for r in records])
+        for r in records:
+            info = user_info.get(r["user_id"], {})
+            r["name"]   = info.get("name", "")
+            r["mobile"] = info.get("mobile", "")
         return {
             "data":    records,
             "source":  "orders + order_details + categories tables, replica_uae",
@@ -1415,6 +1474,11 @@ def get_lost_users_winback(min_revenue: float = 2000, limit: int = 50) -> dict:
             "top_categories":  cats,
             "tactic":          _winback_tactic(days, ltv, cats, patterns),
         })
+    user_info = _fetch_user_info([r["user_id"] for r in records])
+    for r in records:
+        info = user_info.get(r["user_id"], {})
+        r["name"]   = info.get("name", "")
+        r["mobile"] = info.get("mobile", "")
 
     return {
         "data":    records,
