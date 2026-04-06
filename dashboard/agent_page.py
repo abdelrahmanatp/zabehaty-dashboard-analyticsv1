@@ -371,157 +371,142 @@ def render_agent_page(t, h, lang: str):
     </style>
     """, unsafe_allow_html=True)
 
-    # ── Mic button injected into the chat-input DOM via JavaScript ────────────
-    # CSS positioning can never reliably place a separate Streamlit widget
-    # *inside* another component's container. The only real solution is to use
-    # JavaScript to physically insert a button element into the chat input DOM,
-    # then use the browser's Web Speech API for transcription — no server round
-    # trip, no separate widget, the button is literally part of the input bar.
-    st.components.v1.html("""
+    # ── Mic button: fixed-position next to the chat input bar ────────────────
+    # st.components.v1.html runs in a sandboxed cross-origin iframe — window.parent.document
+    # is blocked by the browser. st.markdown() renders inline in the main document,
+    # so document.querySelector works directly without any cross-origin issues.
+    st.markdown("""
+    <style>
+    /* Narrow the chat input textarea so the mic doesn't overlap the send button */
+    [data-testid="stChatInput"] textarea {
+        padding-right: 48px !important;
+    }
+    /* Mic button: fixed at the same bottom level as the chat input send button */
+    #zab-mic-btn {
+        position: fixed;
+        bottom: 14px;
+        right: 60px;
+        z-index: 9999;
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        border: 1px solid rgba(128,128,128,0.3);
+        background: var(--background-color, #fff);
+        cursor: pointer;
+        font-size: 17px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.75;
+        transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+        user-select: none;
+        -webkit-user-select: none;
+    }
+    #zab-mic-btn:hover {
+        opacity: 1;
+        border-color: rgba(128,128,128,0.6);
+    }
+    #zab-mic-btn.zab-recording {
+        background: #fee2e2;
+        border-color: #f87171;
+        opacity: 1;
+    }
+    /* Dark theme support */
+    @media (prefers-color-scheme: dark) {
+        #zab-mic-btn { background: #1e1e2e; border-color: rgba(255,255,255,0.2); }
+        #zab-mic-btn:hover { border-color: rgba(255,255,255,0.4); }
+        #zab-mic-btn.zab-recording { background: #3b0000; border-color: #f87171; }
+    }
+    </style>
+
+    <div id="zab-mic-btn" title="Tap to speak">🎤</div>
+
     <script>
     (function() {
-        var MIC_ID = 'zab-injected-mic';
+        // This script runs inline in the main document — no cross-origin iframe.
+        // document.querySelector works directly here.
+        var btn = document.getElementById('zab-mic-btn');
+        if (!btn || btn._zabInit) return;
+        btn._zabInit = true;
+
         var listening = false;
         var recognition = null;
 
-        function setupRecognition(btn) {
+        function getLang() {
+            // Check page direction (set by app.py for Arabic UI)
+            return (document.documentElement.dir === 'rtl' ||
+                    document.body.dir === 'rtl' ||
+                    document.documentElement.lang === 'ar')
+                ? 'ar-AE' : 'en-US';
+        }
+
+        function buildRecognition() {
             var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SR) { btn.title = 'Speech recognition not supported in this browser'; btn.style.opacity='0.3'; return; }
+            if (!SR) {
+                btn.title = 'Speech recognition not supported in this browser';
+                btn.style.opacity = '0.3';
+                btn.style.cursor = 'not-allowed';
+                return null;
+            }
+            var r = new SR();
+            r.continuous = false;
+            r.interimResults = false;
+            r.lang = getLang();
 
-            recognition = new SR();
-            recognition.continuous = false;
-            recognition.interimResults = false;
-
-            recognition.onstart = function() {
+            r.onstart = function() {
                 listening = true;
                 btn.textContent = '🔴';
                 btn.title = 'Recording… tap to stop';
-                btn.style.opacity = '1';
+                btn.classList.add('zab-recording');
             };
-            recognition.onend = function() {
+            r.onend = function() {
                 listening = false;
                 btn.textContent = '🎤';
                 btn.title = 'Tap to speak';
-                btn.style.opacity = '0.7';
+                btn.classList.remove('zab-recording');
             };
-            recognition.onerror = function(e) {
+            r.onerror = function() {
                 listening = false;
                 btn.textContent = '🎤';
-                btn.style.opacity = '0.7';
+                btn.classList.remove('zab-recording');
+                recognition = null;
             };
-            recognition.onresult = function(event) {
+            r.onresult = function(event) {
                 var transcript = event.results[0][0].transcript;
-                // Write transcript into the Streamlit chat textarea and trigger React update
-                var chatContainer = document.querySelector('[data-testid="stChatInput"]');
-                if (!chatContainer) return;
-                var textarea = chatContainer.querySelector('textarea');
-                if (!textarea) return;
-                var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-                nativeSetter.call(textarea, transcript);
-                textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                textarea.dispatchEvent(new Event('change', { bubbles: true }));
-                textarea.focus();
+                // Write the transcript into Streamlit's chat textarea and fire a React input event
+                var chatEl = document.querySelector('[data-testid="stChatInput"]');
+                if (!chatEl) return;
+                var ta = chatEl.querySelector('textarea');
+                if (!ta) return;
+                var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+                setter.call(ta, transcript);
+                ta.dispatchEvent(new Event('input', { bubbles: true }));
+                ta.dispatchEvent(new Event('change', { bubbles: true }));
+                ta.focus();
             };
+            return r;
         }
 
-        function injectMic() {
-            // Walk up through the iframe boundary to the top-level document
-            var topDoc = window.parent ? window.parent.document : document;
-            var chatContainer = topDoc.querySelector('[data-testid="stChatInput"]');
-            if (!chatContainer) { setTimeout(injectMic, 400); return; }
-            if (topDoc.getElementById(MIC_ID)) return; // already injected
-
-            // Find the send button so we can insert before it
-            var sendBtn = chatContainer.querySelector('button[kind="primaryFormSubmit"], button[data-testid="stChatInputSubmitButton"], button');
-
-            var mic = topDoc.createElement('button');
-            mic.id = MIC_ID;
-            mic.type = 'button';
-            mic.textContent = '🎤';
-            mic.title = 'Tap to speak';
-            mic.style.cssText = [
-                'background:none',
-                'border:none',
-                'cursor:pointer',
-                'font-size:20px',
-                'line-height:1',
-                'padding:4px 6px',
-                'margin:0 2px',
-                'border-radius:6px',
-                'opacity:0.7',
-                'transition:opacity 0.15s',
-                'flex-shrink:0',
-                'align-self:center',
-                'display:inline-flex',
-                'align-items:center',
-                'justify-content:center',
-            ].join(';');
-
-            mic.onmouseenter = function() { this.style.opacity='1'; };
-            mic.onmouseleave = function() { if(!listening) this.style.opacity='0.7'; };
-
-            // Detect language from page direction for STT
-            var lang = (topDoc.documentElement.dir === 'rtl' || topDoc.body.dir === 'rtl') ? 'ar-AE' : 'en-US';
-
-            mic.addEventListener('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                if (!recognition) { setupRecognitionTop(mic, topDoc, lang); }
-                if (listening) {
-                    recognition.stop();
-                } else {
-                    try { recognition.lang = lang; recognition.start(); }
-                    catch(err) { recognition = null; }
-                }
-            });
-
-            if (sendBtn) {
-                chatContainer.insertBefore(mic, sendBtn);
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!recognition) recognition = buildRecognition();
+            if (!recognition) return;
+            if (listening) {
+                recognition.stop();
             } else {
-                chatContainer.appendChild(mic);
+                try {
+                    recognition.lang = getLang();
+                    recognition.start();
+                } catch(err) {
+                    recognition = null;
+                }
             }
-        }
-
-        function setupRecognitionTop(btn, topDoc, lang) {
-            var topWin = window.parent || window;
-            var SR = topWin.SpeechRecognition || topWin.webkitSpeechRecognition;
-            if (!SR) { btn.title='Not supported'; btn.style.opacity='0.3'; return; }
-            recognition = new SR();
-            recognition.continuous = false;
-            recognition.interimResults = false;
-            recognition.lang = lang;
-            recognition.onstart = function() { listening=true; btn.textContent='🔴'; btn.title='Recording… tap to stop'; btn.style.opacity='1'; };
-            recognition.onend = function() { listening=false; btn.textContent='🎤'; btn.title='Tap to speak'; btn.style.opacity='0.7'; };
-            recognition.onerror = function(e) { listening=false; btn.textContent='🎤'; btn.style.opacity='0.7'; };
-            recognition.onresult = function(event) {
-                var transcript = event.results[0][0].transcript;
-                var chatContainer = topDoc.querySelector('[data-testid="stChatInput"]');
-                if (!chatContainer) return;
-                var textarea = chatContainer.querySelector('textarea');
-                if (!textarea) return;
-                var nativeSetter = Object.getOwnPropertyDescriptor(topWin.HTMLTextAreaElement.prototype, 'value').set;
-                nativeSetter.call(textarea, transcript);
-                textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                textarea.dispatchEvent(new Event('change', { bubbles: true }));
-                textarea.focus();
-            };
-        }
-
-        // Re-inject after every Streamlit rerender (MutationObserver on parent doc)
-        try {
-            var topDoc = window.parent ? window.parent.document : document;
-            injectMic();
-            var observer = new MutationObserver(function() {
-                if (!topDoc.getElementById(MIC_ID)) injectMic();
-            });
-            observer.observe(topDoc.body, { childList: true, subtree: true });
-        } catch(e) {
-            // Cross-origin fallback: inject into local iframe doc
-            injectMic();
-        }
+        });
     })();
     </script>
-    """, height=0)
+    """, unsafe_allow_html=True)
 
     # ── Text input ────────────────────────────────────────────────────────────
     user_text = st.chat_input(t("agent_placeholder"))
