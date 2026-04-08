@@ -32,33 +32,86 @@ except ImportError:
 # Results are cached for 2 hours so repeated page-switches don't re-query.
 # ══════════════════════════════════════════════════════════════════════════════
 _APP_ROOT = os.path.dirname(os.path.dirname(__file__))
-_PIPELINE_FILES = [
-    "rfm_scores.csv", "ltv_analysis.csv", "churn_risk.csv",
-    "bcg_matrix.csv", "shop_performance.csv", "shop_rankings.json",
-    "buying_patterns.json", "category_performance.csv",
-]
 
-def _pipeline_files_exist():
-    return all(os.path.exists(os.path.join(_APP_ROOT, ".tmp", f)) for f in _PIPELINE_FILES)
+import time as _time
+_STALE_SECONDS = 6 * 3600  # re-run a tool if its output files are older than 6h
 
-def _run_pipeline():
-    """Run all analysis tools to populate .tmp/. Called once on cold start."""
-    import sys
-    sys.path.insert(0, os.path.join(_APP_ROOT, "tools"))
+_TOOL_OUTPUT_FILES = {
+    "user_analysis":    ["rfm_scores.csv", "ltv_analysis.csv", "user_segments.json", "cohort_retention.csv"],
+    "product_analysis": ["bcg_matrix.csv", "top_products.csv", "category_performance.csv", "product_recommendations.json"],
+    "shop_analysis":    ["shop_performance.csv", "shop_rankings.json"],
+    "buying_patterns":  ["buying_patterns.json", "churn_risk.csv", "cross_category.csv"],
+}
+
+def _tool_files_exist(tool_name: str) -> bool:
+    """True only if all output files for this tool exist AND are < 6h old."""
+    now = _time.time()
+    for fname in _TOOL_OUTPUT_FILES.get(tool_name, []):
+        path = os.path.join(_APP_ROOT, ".tmp", fname)
+        if not os.path.exists(path):
+            return False
+        if (now - os.path.getmtime(path)) > _STALE_SECONDS:
+            return False
+    return True
+
+def _run_tool(tool_name: str):
+    """Import and run a single analysis tool. Sets CWD so relative .tmp/ writes work."""
+    import sys as _sys
+    _tools_path = os.path.join(_APP_ROOT, "tools")
+    if _tools_path not in _sys.path:
+        _sys.path.insert(0, _tools_path)
+    os.chdir(_APP_ROOT)
     os.makedirs(os.path.join(_APP_ROOT, ".tmp"), exist_ok=True)
-    from user_analysis    import run as _run_user
-    from product_analysis import run as _run_products
-    from shop_analysis    import run as _run_shops
-    from buying_patterns  import run as _run_patterns
-    from llm_interpreter  import run as _run_narrative
-    _run_user()
-    _run_products()
-    _run_shops()
-    _run_patterns()
-    _run_narrative()
+    if tool_name == "user_analysis":
+        from user_analysis import run as _run
+    elif tool_name == "product_analysis":
+        from product_analysis import run as _run
+    elif tool_name == "shop_analysis":
+        from shop_analysis import run as _run
+    elif tool_name == "buying_patterns":
+        from buying_patterns import run as _run
+    else:
+        raise ValueError(f"Unknown tool: {tool_name}")
+    _run()
 
-if "pipeline_ready" not in st.session_state:
-    st.session_state.pipeline_ready = _pipeline_files_exist()
+_PAGE_TOOLS = {
+    "overview":  ["user_analysis", "buying_patterns", "shop_analysis"],
+    "segments":  ["user_analysis"],
+    "products":  ["product_analysis"],
+    "vendors":   ["shop_analysis"],
+    "patterns":  ["buying_patterns"],
+    "report":    [],  # on-demand only via button
+    "health":    [],  # live DB queries — no pipeline needed
+    "agent":     [],  # AI agent — no pipeline needed
+}
+
+_TOOL_SPINNER = {
+    "user_analysis":    "Analysing customer segments & lifetime value…",
+    "product_analysis": "Scoring product portfolio (BCG matrix)…",
+    "shop_analysis":    "Evaluating vendor performance…",
+    "buying_patterns":  "Reading buying patterns & churn risk…",
+}
+
+def ensure_tools_for_page(page_key: str):
+    """Run any tools required by this page that are missing or stale. Idempotent per session."""
+    for tool_name in _PAGE_TOOLS.get(page_key, []):
+        already_ran = tool_name in st.session_state.tools_ready
+        still_fresh = _tool_files_exist(tool_name)
+        if already_ran and still_fresh:
+            continue
+        with st.spinner(f"⏳ {_TOOL_SPINNER.get(tool_name, 'Loading data…')} (first visit only)"):
+            try:
+                _run_tool(tool_name)
+                st.session_state.tools_ready.add(tool_name)
+            except Exception as _e:
+                st.error(f"Could not load data ({tool_name}): {_e}. Check DB credentials.")
+                st.stop()
+
+if "tools_ready" not in st.session_state:
+    # Pre-populate with any tools whose files are already fresh on disk
+    st.session_state.tools_ready = {
+        name for name in _TOOL_OUTPUT_FILES if _tool_files_exist(name)
+    }
 
 try:
     import matplotlib
@@ -1190,21 +1243,14 @@ else:
 st.sidebar.divider()
 if st.sidebar.button(t("refresh")):
     st.cache_data.clear()
+    st.session_state.tools_ready = set()
     st.rerun()
 st.sidebar.caption(t("data_source"))
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: OVERVIEW
 # ══════════════════════════════════════════════════════════════════════════════
-# ── Lazy pipeline — only run when a data page is accessed, not on agent ───────
-if page_key != "agent" and not st.session_state.pipeline_ready:
-    with st.spinner("⏳ Loading analysis data for the first time — about 60 seconds…"):
-        try:
-            _run_pipeline()
-            st.session_state.pipeline_ready = True
-        except Exception as _e:
-            st.error(f"Pipeline failed: {_e}. Check DB credentials.")
-            st.stop()
+ensure_tools_for_page(page_key)
 
 if page_key == "overview":
     st.title(t("overview_title"))

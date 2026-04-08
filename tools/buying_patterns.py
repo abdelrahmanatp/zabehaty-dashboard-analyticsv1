@@ -58,6 +58,7 @@ def load_recent_orders():
         WHERE o.status = 3
           AND o.payment_status = 'completed'
           AND o.user_id IN (SELECT id FROM user WHERE is_ban = 0 OR is_ban IS NULL)
+          AND DATE(o.created_at) >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
     """
     df_live = query_df(sql)
     df_synth = load_synthetic_orders_df()

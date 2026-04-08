@@ -69,6 +69,7 @@ def load_order_frequency():
         FROM orders
         WHERE status = 3
           AND payment_status = 'completed'
+          AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
         GROUP BY user_id
     """
     df_live = query_df(sql)

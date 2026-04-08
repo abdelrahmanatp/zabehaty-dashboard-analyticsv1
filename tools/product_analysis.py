@@ -58,6 +58,7 @@ def load_order_items():
           ON od.order_id = o.id
          AND o.status = 3
          AND o.payment_status = 'completed'
+         AND DATE(o.created_at) >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
         LEFT JOIN products p       ON od.product_id = p.id AND p.deleted_at IS NULL
         LEFT JOIN sub_products sp  ON od.sub_product_id = sp.id
         LEFT JOIN shops s          ON o.shop_id = s.id

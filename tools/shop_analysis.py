@@ -45,6 +45,7 @@ def load_shop_orders():
         FROM orders o
         LEFT JOIN shops s ON o.shop_id = s.id
         WHERE o.shop_id IS NOT NULL
+          AND DATE(o.created_at) >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
     """
     df_live = query_df(sql)
     df_synth = load_synthetic_orders_df()
