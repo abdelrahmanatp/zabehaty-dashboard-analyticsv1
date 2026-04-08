@@ -50,10 +50,12 @@ def _run_pipeline():
     from product_analysis import run as _run_products
     from shop_analysis    import run as _run_shops
     from buying_patterns  import run as _run_patterns
+    from llm_interpreter  import run as _run_narrative
     _run_user()
     _run_products()
     _run_shops()
     _run_patterns()
+    _run_narrative()
 
 if "pipeline_ready" not in st.session_state:
     st.session_state.pipeline_ready = _pipeline_files_exist()
@@ -1860,15 +1862,26 @@ elif page_key == "report":
     md_path      = os.path.join(TMP, "board_summary.md")
 
     if not narrative_en:
-        st.warning(t("no_narrative")); st.stop()
+        st.info("📋 " + ("لم يتم توليد التقرير بعد." if lang == "ar" else "Board report not generated yet."))
+        btn_label = "🤖 توليد التقرير الآن" if lang == "ar" else "🤖 Generate Report Now"
+        if st.button(btn_label, type="primary"):
+            with st.spinner("جارٍ توليد التقرير بالذكاء الاصطناعي…" if lang == "ar" else "Generating report with AI… (this takes ~30 seconds)"):
+                try:
+                    _tools_dir2 = os.path.join(ROOT, "tools")
+                    if _tools_dir2 not in sys.path:
+                        sys.path.insert(0, _tools_dir2)
+                    import llm_interpreter as _li
+                    _li.run()
+                    st.success("✅ " + ("تم توليد التقرير." if lang == "ar" else "Report generated."))
+                    st.rerun()
+                except Exception as _gen_err:
+                    st.error(f"Generation failed: {_gen_err}")
+        st.stop()
 
     # Load the correct language report
     if lang == "ar" and os.path.exists(ar_path):
         with open(ar_path, encoding="utf-8") as _f:
             narrative = json.load(_f)
-    elif lang == "ar":
-        st.info("التقرير العربي غير متاح بعد. شغّل `python tools/llm_interpreter.py` لتوليده.")
-        narrative = narrative_en
     else:
         narrative = narrative_en
 
