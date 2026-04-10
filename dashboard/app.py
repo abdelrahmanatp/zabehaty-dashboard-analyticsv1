@@ -34,7 +34,7 @@ except ImportError:
 _APP_ROOT = os.path.dirname(os.path.dirname(__file__))
 
 import time as _time
-_STALE_SECONDS = 6 * 3600  # re-run a tool if its output files are older than 6h
+_STALE_SECONDS = 24 * 3600  # re-run a tool if its output files are older than 24h
 
 _TOOL_OUTPUT_FILES = {
     "user_analysis":    ["rfm_scores.csv", "ltv_analysis.csv", "user_segments.json", "cohort_retention.csv"],
@@ -93,7 +93,13 @@ _TOOL_SPINNER = {
 }
 
 def ensure_tools_for_page(page_key: str):
-    """Run any tools required by this page that are missing or stale. Idempotent per session."""
+    """Run any tools required by this page that are missing or stale. Idempotent per session.
+
+    After all tools finish, clears the @st.cache_data cache and reruns the page.
+    This is necessary because sidebar functions like rfm_date_bounds() run before
+    this function and cache empty results when .tmp/ files don't exist yet.
+    """
+    any_ran = False
     for tool_name in _PAGE_TOOLS.get(page_key, []):
         already_ran = tool_name in st.session_state.tools_ready
         still_fresh = _tool_files_exist(tool_name)
@@ -103,9 +109,14 @@ def ensure_tools_for_page(page_key: str):
             try:
                 _run_tool(tool_name)
                 st.session_state.tools_ready.add(tool_name)
+                any_ran = True
             except Exception as _e:
                 st.error(f"Could not load data ({tool_name}): {_e}. Check DB credentials.")
                 st.stop()
+    if any_ran:
+        # Clear stale cache entries (e.g. rfm_date_bounds cached empty before tool ran)
+        st.cache_data.clear()
+        st.rerun()
 
 if "tools_ready" not in st.session_state:
     # Pre-populate with any tools whose files are already fresh on disk
