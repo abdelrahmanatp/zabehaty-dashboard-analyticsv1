@@ -550,7 +550,10 @@ def render_agent_page(t, h, lang: str):
         }}
         window._zabOn   = window._zabOn   || false;
         window._zabRec  = window._zabRec  || null;
-        window._zabChip = function(btn) {{ fillInput(btn.textContent.trim()); }};
+        window._zabChip = function(btn) {{
+            var el = btn.querySelector('.zab-gi-text') || btn;
+            fillInput(el.textContent.trim());
+        }};
         window._zabToggle = function(btn) {{
             if (window._zabOn) {{ if (window._zabRec) window._zabRec.stop(); return; }}
             var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -646,40 +649,3 @@ def render_agent_page(t, h, lang: str):
             "excel_filename": "zabehaty_report.xlsx",
         })
 
-    # ── Starter prompts (shown when conversation is empty) ────────────────────
-    if not st.session_state.chat_messages:
-        st.markdown("---")
-        if lang == "ar":
-            st.markdown("**💡 أسئلة مقترحة:**")
-            starters = [
-                "كم عدد الطلبات هذا الشهر؟",
-                "ما متوسط القيمة الحياتية للعميل؟",
-                "أعطني تقريراً شاملاً عن الستة أشهر الماضية بإكسل",
-                "ما هي أفضل فرص البيع المتقاطع لزيادة مبيعاتنا؟",
-                "من هم عملاؤنا الأكثر قيمة وما الأفضل لاستهدافهم؟",
-                "أنشئ حملة واتساب مخصصة لأفضل عملائنا",
-                "من هم العملاء الذين فقدناهم وكيف نستعيدهم؟",
-                "كم عدد العملاء في خطر الانقطاع؟",
-                "ما هي الإيرادات المتوقعة في الأسبوعين القادمين؟",
-                "كيف توزع المستخدمون على الشرائح؟",
-            ]
-        else:
-            st.markdown("**💡 Suggested questions:**")
-            starters = [
-                "How many orders did we get this month?",
-                "What is our average customer LTV?",
-                "Give me a full business performance report for the last 6 months as Excel",
-                "What are the top cross-selling opportunities to boost sales?",
-                "Generate a personalised WhatsApp promo campaign for our top customers",
-                "Who are our lost high-value customers and how do we win them back?",
-                "Which shops are performing best this month?",
-                "How many users are at churn risk?",
-                "What revenue should we expect in the next 2 weeks?",
-                "What's the breakdown of user segments?",
-            ]
-
-        cols = st.columns(2)
-        for i, prompt in enumerate(starters):
-            if cols[i % 2].button(prompt, use_container_width=True, key=f"starter_{i}"):
-                st.session_state.pending_prompt = prompt
-                st.rerun()
