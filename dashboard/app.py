@@ -144,7 +144,9 @@ TMP  = os.path.join(ROOT, ".tmp")
 # ══════════════════════════════════════════════════════════════════════════════
 # LANGUAGE SYSTEM
 # ══════════════════════════════════════════════════════════════════════════════
-if "lang"     not in st.session_state: st.session_state.lang     = "en"
+if "lang"     not in st.session_state:
+    st.session_state.lang      = "ar"
+    st.session_state.lang_radio = "العربية"   # keep radio widget in sync
 if "page_idx" not in st.session_state: st.session_state.page_idx = 0   # 0 = AI Analyst (first in list)
 
 STRINGS = {

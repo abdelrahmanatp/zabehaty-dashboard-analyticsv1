@@ -172,6 +172,19 @@ LANGUAGE:
 - Mixed messages → match the dominant language
 - Use formal Gulf Arabic (الفصحى التجارية) not colloquial
 
+NUMBER FORMATTING — ALWAYS APPLY:
+Every number in your response MUST be formatted with thousand separators and correct decimals.
+No exceptions — applies to inline text, tables, bullet points, and tool output values alike.
+
+| Type | Format | Example |
+|---|---|---|
+| Revenue / amounts | AED X,XXX,XXX.XX (2 dp) | AED 1,356,874.22 |
+| Order / user counts | X,XXX (commas, no dp) | 12,450 |
+| Percentages | XX.X% (1 dp) | 23.5% |
+| LTV / averages | AED X,XXX.XX (2 dp) | AED 4,231.80 |
+
+NEVER write a raw unformatted number like 1356874 or 45678.234 — always format it.
+
 NEVER:
 - Make up numbers without calling a tool
 - Say "it seems" or "it appears" — be direct
@@ -371,162 +384,129 @@ def render_agent_page(t, h, lang: str):
     </style>
     """, unsafe_allow_html=True)
 
-    # ── Mic button: injected into document.body, kept alive via MutationObserver ─
-    # The button is appended to document.body (not inside a Streamlit component)
-    # so React cannot remove it during rerenders. A MutationObserver recreates it
-    # immediately if it ever disappears. Speech recognition state lives in the JS
-    # closure and survives Streamlit rerenders without resetting.
-    st.markdown("""
+    # ── Mic button: full-width bar fixed just above the chat input ───────────
+    # Plain HTML button rendered in the main document — no iframe, no injection.
+    # window._zab* globals persist across Streamlit rerenders so recording state
+    # is never lost. MutationObserver re-wires click handler if React rebuilds
+    # the element. stBottom restored to full width (no more 90/10 split hack).
+    _mic_idle = "🎤  اضغط هنا للتحدث  /  Tap here to speak"
+    _mic_rec  = "🔴  جارٍ التسجيل…  اضغط للإيقاف  /  Recording…  tap to stop"
+    st.markdown(f"""
     <style>
-    /*
-     * Layout: stBottom bar = 90% wide, mic fills the remaining 10%.
-     * Both sit at the same height — true side-by-side, no tricks.
-     *
-     * LTR: text input on left (90%), mic on right (10%)
-     * RTL: mic on left (10%), text input on right (90%)
-     */
-
-    /* LTR — shrink the bottom bar to 90%, leaving 10% on the right for mic */
-    [data-testid="stBottom"] {
-        width: 90% !important;
-        right: 0 !important;
-        left: auto !important;
-    }
-
-    /* RTL — shrink to 90% from the right, leaving 10% on the left for mic */
-    [dir="rtl"] [data-testid="stBottom"] {
+    /* Restore stBottom to full width */
+    [data-testid="stBottom"] {{
+        width: 100% !important;
         left: 0 !important;
-        right: auto !important;
-    }
-
-    /* Mic button: fixed, fills the 10% gap at the same height as the bottom bar */
-    #zab-mic-btn {
+        right: 0 !important;
+    }}
+    /* Full-width mic bar sitting just above the chat input */
+    #zab-mic-btn {{
         position: fixed;
-        bottom: 0;
-        width: 10%;
-        height: 68px;       /* matches stBottom bar height */
-        z-index: 99999;
+        bottom: 68px;
+        left: 0;
+        right: 0;
+        width: 100%;
+        height: 40px;
+        z-index: 9998;
+        margin: 0;
+        padding: 0;
         border: none;
-        border-top: 1px solid rgba(100,100,100,0.15);
-        border-left: 1px solid rgba(100,100,100,0.15);
-        background: var(--background-color, #ffffff);
+        border-top: 1px solid rgba(0,0,0,0.10);
+        border-bottom: 1px solid rgba(0,0,0,0.06);
+        background: #f4f4f5;
+        color: #444;
         cursor: pointer;
-        font-size: 22px;
+        font-size: 14px;
+        font-family: inherit;
+        letter-spacing: 0.01em;
         display: flex !important;
         align-items: center;
         justify-content: center;
-        user-select: none;
-        -webkit-user-select: none;
         transition: background 0.15s;
         -webkit-tap-highlight-color: transparent;
-        /* LTR: mic sits on the right (left edge of 10% gap = 90% from left) */
-        left: 90%;
-        right: auto;
-    }
-    /* RTL: mic sits on the left (right edge of 10% gap = 90% from right) */
-    [dir="rtl"] #zab-mic-btn {
-        right: 90%;
-        left: auto;
-        border-left: none;
-        border-right: 1px solid rgba(100,100,100,0.15);
-    }
-
-    #zab-mic-btn:hover  { background: rgba(100,100,100,0.07); }
-    #zab-mic-btn:active { background: rgba(100,100,100,0.15); }
-    #zab-mic-btn.zab-rec {
+        user-select: none;
+    }}
+    #zab-mic-btn:hover  {{ background: #e8e8ea; }}
+    #zab-mic-btn:active {{ background: #dcdcde; }}
+    #zab-mic-btn.zab-rec {{
         background: #fee2e2;
-        animation: zab-pulse 1s infinite;
-    }
-    @keyframes zab-pulse {
-        0%, 100% { background: #fee2e2; }
-        50%       { background: #fecaca; }
-    }
-    @media (prefers-color-scheme: dark) {
-        #zab-mic-btn { background: #1e1e2e; }
-        #zab-mic-btn:hover { background: #2a2a3e; }
-        #zab-mic-btn.zab-rec { background: #4a0000; }
-    }
-    /* Mobile: mic slightly smaller, same proportions */
-    @media (max-width: 640px) {
-        #zab-mic-btn { font-size: 19px; height: 60px; }
-    }
+        color: #b91c1c;
+        animation: zab-pulse 1.2s ease-in-out infinite;
+    }}
+    @keyframes zab-pulse {{
+        0%,100% {{ opacity: 1; }}
+        50%      {{ opacity: 0.7; }}
+    }}
+    /* Push page content above both bars */
+    .main .block-container {{ padding-bottom: 130px !important; }}
+    @media (prefers-color-scheme: dark) {{
+        #zab-mic-btn {{ background: #1e1e2e; color: #ccc; border-color: rgba(255,255,255,0.1); }}
+        #zab-mic-btn:hover {{ background: #26263a; }}
+        #zab-mic-btn.zab-rec {{ background: #3b0000; color: #fca5a5; }}
+    }}
+    @media (max-width: 640px) {{
+        #zab-mic-btn {{ bottom: 60px; font-size: 13px; }}
+        .main .block-container {{ padding-bottom: 115px !important; }}
+    }}
     </style>
 
-    <script>
-    (function() {
-        // All state lives in this closure — survives Streamlit rerenders
-        var listening = false;
-        var recognition = null;
+    <button id="zab-mic-btn" type="button">{_mic_idle}</button>
 
-        function getLang() {
+    <script>
+    (function() {{
+        // window-level globals — survive every Streamlit rerender
+        if (window._zabInited) return;
+        window._zabInited = true;
+        window._zabOn  = false;
+        window._zabRec = null;
+
+        var IDLE = {repr(_mic_idle)};
+        var REC  = {repr(_mic_rec)};
+
+        function getLang() {{
             return (document.documentElement.dir === 'rtl' || document.body.dir === 'rtl')
                 ? 'ar-AE' : 'en-US';
-        }
+        }}
 
-        function fillInput(text) {
-            var chatEl = document.querySelector('[data-testid="stChatInput"]');
-            if (!chatEl) return;
-            var ta = chatEl.querySelector('textarea');
+        function fillInput(text) {{
+            var ta = document.querySelector('[data-testid="stChatInput"] textarea');
             if (!ta) return;
-            var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-            setter.call(ta, text);
-            ta.dispatchEvent(new Event('input',  { bubbles: true }));
-            ta.dispatchEvent(new Event('change', { bubbles: true }));
+            var s = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+            s.call(ta, text);
+            ta.dispatchEvent(new Event('input',  {{bubbles: true}}));
+            ta.dispatchEvent(new Event('change', {{bubbles: true}}));
             ta.focus();
-        }
+        }}
 
-        function buildRecognition(btn) {
+        function toggleMic(btn) {{
+            if (window._zabOn) {{ if (window._zabRec) window._zabRec.stop(); return; }}
             var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SR) { btn.title = 'Voice not supported in this browser'; btn.style.opacity = '0.35'; return null; }
-            var r = new SR();
-            r.continuous = false;
-            r.interimResults = false;
-            r.onstart  = function() { listening = true;  btn.innerHTML = '🔴'; btn.classList.add('zab-rec'); };
-            r.onend    = function() { listening = false; btn.innerHTML = '🎤'; btn.classList.remove('zab-rec'); };
-            r.onerror  = function() { listening = false; btn.innerHTML = '🎤'; btn.classList.remove('zab-rec'); recognition = null; };
-            r.onresult = function(ev) { fillInput(ev.results[0][0].transcript); };
-            return r;
-        }
+            if (!SR) {{ btn.textContent = '❌  Voice recognition not supported in this browser'; return; }}
+            window._zabRec = new SR();
+            window._zabRec.lang = getLang();
+            window._zabRec.onstart  = function() {{ window._zabOn = true;  btn.textContent = REC;  btn.classList.add('zab-rec'); }};
+            window._zabRec.onend    = function() {{ window._zabOn = false; btn.textContent = IDLE; btn.classList.remove('zab-rec'); }};
+            window._zabRec.onerror  = function() {{ window._zabOn = false; window._zabRec = null; btn.textContent = IDLE; btn.classList.remove('zab-rec'); }};
+            window._zabRec.onresult = function(e) {{ fillInput(e.results[0][0].transcript); }};
+            try {{ window._zabRec.start(); }} catch(_) {{ window._zabRec = null; }}
+        }}
 
-        function positionMic(btn) {
-            // Positioning is handled by CSS [dir="rtl"] selectors.
-            // This function is a no-op kept so MutationObserver can call it
-            // without errors; it's here in case JS-level overrides are needed later.
-        }
-
-        function createMic() {
-            if (document.getElementById('zab-mic-btn')) return;
-            var btn = document.createElement('button');
-            btn.id        = 'zab-mic-btn';
-            btn.type      = 'button';
-            btn.innerHTML = '🎤';
-            btn.title     = 'Tap to speak';
-            positionMic(btn);
-            btn.addEventListener('click', function(e) {
-                e.preventDefault(); e.stopPropagation();
-                if (!recognition) recognition = buildRecognition(btn);
-                if (!recognition) return;
-                if (listening) { recognition.stop(); }
-                else { try { recognition.lang = getLang(); recognition.start(); } catch(_) { recognition = null; } }
-            });
-            document.body.appendChild(btn);
-        }
-
-        // Create on first load
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', createMic);
-        } else {
-            createMic();
-        }
-
-        // Recreate if Streamlit's React ever removes it during a rerender
-        new MutationObserver(function() {
+        function wire() {{
             var btn = document.getElementById('zab-mic-btn');
-            if (!btn) { createMic(); return; }
-            // Reposition if page direction changed (language switch)
-            positionMic(btn);
-        }).observe(document.body, { childList: true, subtree: true });
-    })();
+            if (!btn || btn._w) return;
+            btn._w = true;
+            // Restore visual state if recording was ongoing when rerender hit
+            if (window._zabOn) {{ btn.textContent = REC; btn.classList.add('zab-rec'); }}
+            btn.addEventListener('click', function(e) {{ e.preventDefault(); toggleMic(btn); }});
+        }}
+
+        wire();
+        // Re-wire whenever Streamlit rebuilds the DOM
+        new MutationObserver(function() {{
+            var btn = document.getElementById('zab-mic-btn');
+            if (btn && !btn._w) wire();
+        }}).observe(document.body, {{childList: true, subtree: true}});
+    }})();
     </script>
     """, unsafe_allow_html=True)
 
