@@ -378,15 +378,21 @@ def render_agent_page(t, h, lang: str):
     # closure and survives Streamlit rerenders without resetting.
     st.markdown("""
     <style>
-    /* Narrow the chat input so text doesn't run under the mic button */
+    /* Narrow the chat input so text doesn't run under the mic button — LTR */
     [data-testid="stBottom"] > div > div {
         padding-right: 58px !important;
     }
-    /* Mic button styles — injected into body by JS below */
+    /* RTL (Arabic): send button is on the left, so mic goes on the left too */
+    [dir="rtl"] [data-testid="stBottom"] > div > div {
+        padding-right: 0   !important;
+        padding-left:  58px !important;
+    }
+    /* Mic button base styles — JS sets left/right based on dir */
     #zab-mic-btn {
         position: fixed;
         bottom: 12px;
-        right: 14px;
+        right: 14px;      /* LTR default */
+        left: auto;
         z-index: 99999;
         width: 44px;
         height: 44px;
@@ -412,8 +418,9 @@ def render_agent_page(t, h, lang: str):
         #zab-mic-btn.zab-rec { background: #4a0000; border-color: #f87171; }
     }
     @media (max-width: 640px) {
-        #zab-mic-btn { width: 40px; height: 40px; font-size: 18px; bottom: 10px; right: 10px; }
+        #zab-mic-btn { width: 40px; height: 40px; font-size: 18px; bottom: 10px; }
         [data-testid="stBottom"] > div > div { padding-right: 54px !important; }
+        [dir="rtl"] [data-testid="stBottom"] > div > div { padding-right: 0 !important; padding-left: 54px !important; }
     }
     </style>
 
@@ -453,6 +460,17 @@ def render_agent_page(t, h, lang: str):
             return r;
         }
 
+        function positionMic(btn) {
+            var isRtl = document.documentElement.dir === 'rtl' || document.body.dir === 'rtl';
+            if (isRtl) {
+                btn.style.right = 'auto';
+                btn.style.left  = '14px';
+            } else {
+                btn.style.left  = 'auto';
+                btn.style.right = '14px';
+            }
+        }
+
         function createMic() {
             if (document.getElementById('zab-mic-btn')) return;
             var btn = document.createElement('button');
@@ -460,6 +478,7 @@ def render_agent_page(t, h, lang: str):
             btn.type      = 'button';
             btn.innerHTML = '🎤';
             btn.title     = 'Tap to speak';
+            positionMic(btn);
             btn.addEventListener('click', function(e) {
                 e.preventDefault(); e.stopPropagation();
                 if (!recognition) recognition = buildRecognition(btn);
@@ -479,7 +498,10 @@ def render_agent_page(t, h, lang: str):
 
         // Recreate if Streamlit's React ever removes it during a rerender
         new MutationObserver(function() {
-            if (!document.getElementById('zab-mic-btn')) createMic();
+            var btn = document.getElementById('zab-mic-btn');
+            if (!btn) { createMic(); return; }
+            // Reposition if page direction changed (language switch)
+            positionMic(btn);
         }).observe(document.body, { childList: true, subtree: true });
     })();
     </script>
