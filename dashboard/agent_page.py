@@ -508,7 +508,7 @@ def render_agent_page(t, h, lang: str):
         label = label_ar if lang == "ar" else label_en
         chips = chips_ar if lang == "ar" else chips_en
         items = "".join(
-            f'<button class="zab-group-item" onclick="window._zabChip(this)">'
+            f'<button class="zab-group-item" type="button">'
             f'<span class="zab-gi-text">{c}</span>'
             f'<span class="zab-gi-arrow">›</span>'
             f'</button>'
@@ -530,12 +530,13 @@ def render_agent_page(t, h, lang: str):
     )
 
     st.markdown(f"""
-    <button id="zab-mic" type="button" onclick="window._zabToggle(this)">{_mic_idle}</button>
-    <div class="zab-groups">{_groups_html}</div>
+    <button id="zab-mic" type="button">{_mic_idle}</button>
+    <div class="zab-groups" id="zab-groups">{_groups_html}</div>
     <script>
     (function() {{
         var IDLE = {repr(_mic_idle)};
         var REC  = {repr(_mic_rec)};
+
         function getLang() {{
             return (document.documentElement.dir === 'rtl') ? 'ar-AE' : 'en-US';
         }}
@@ -548,13 +549,13 @@ def render_agent_page(t, h, lang: str):
             ta.dispatchEvent(new Event('change', {{bubbles: true}}));
             ta.focus();
         }}
-        window._zabOn   = window._zabOn   || false;
-        window._zabRec  = window._zabRec  || null;
-        window._zabChip = function(btn) {{
-            var el = btn.querySelector('.zab-gi-text') || btn;
-            fillInput(el.textContent.trim());
-        }};
-        window._zabToggle = function(btn) {{
+
+        window._zabOn  = window._zabOn  || false;
+        window._zabRec = window._zabRec || null;
+
+        function toggleMic() {{
+            var btn = document.getElementById('zab-mic');
+            if (!btn) return;
             if (window._zabOn) {{ if (window._zabRec) window._zabRec.stop(); return; }}
             var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SR) {{ btn.textContent = '❌  Not supported in this browser'; return; }}
@@ -565,7 +566,24 @@ def render_agent_page(t, h, lang: str):
             window._zabRec.onerror  = function() {{ window._zabOn = false; window._zabRec = null; btn.textContent = IDLE; btn.classList.remove('zab-rec'); }};
             window._zabRec.onresult = function(e) {{ fillInput(e.results[0][0].transcript); }};
             try {{ window._zabRec.start(); }} catch(_) {{}}
-        }};
+        }}
+
+        /* Event delegation — no inline onclick attributes, avoids React error #231 */
+        if (!window._zabListenerAttached) {{
+            window._zabListenerAttached = true;
+            document.body.addEventListener('click', function(e) {{
+                /* Mic button */
+                var mic = e.target.closest('#zab-mic');
+                if (mic) {{ toggleMic(); return; }}
+                /* Accordion chip items */
+                var item = e.target.closest('.zab-group-item');
+                if (item) {{
+                    var el = item.querySelector('.zab-gi-text') || item;
+                    fillInput(el.textContent.trim());
+                }}
+            }});
+        }}
+
         /* Restore recording visual state after Streamlit rerenders */
         (function() {{
             var btn = document.getElementById('zab-mic');
