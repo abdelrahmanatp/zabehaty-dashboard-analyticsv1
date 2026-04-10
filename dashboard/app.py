@@ -890,11 +890,12 @@ def inject_css():
         @media (max-width: 768px) {
             .block-container { padding: 0.75rem 0.5rem !important; max-width: 100vw !important; overflow-x: hidden !important; }
             .stApp, .main, .main > div { overflow-x: hidden !important; max-width: 100vw !important; }
-            /* Sidebar: RTL direction must not break the overlay — force LTR positioning */
+            /* Sidebar: Arabic = opens from the RIGHT on mobile */
             section[data-testid="stSidebar"] {
                 position: fixed !important; z-index: 999 !important;
                 width: 85vw !important; max-width: 320px !important;
-                direction: ltr !important; left: 0 !important; right: auto !important;
+                direction: ltr !important;
+                right: 0 !important; left: auto !important;
                 height: 100vh !important; overflow-y: auto !important;
                 -webkit-overflow-scrolling: touch !important;
             }

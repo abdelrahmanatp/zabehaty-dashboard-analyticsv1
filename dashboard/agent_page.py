@@ -399,10 +399,10 @@ def render_agent_page(t, h, lang: str):
         left: 0 !important;
         right: 0 !important;
     }}
-    /* Full-width mic bar sitting just above the chat input */
+    /* Full-width mic bar — bottom is set dynamically by JS */
     #zab-mic-btn {{
         position: fixed;
-        bottom: 68px;
+        bottom: 72px;          /* safe fallback; JS overrides with real stBottom height */
         left: 0;
         right: 0;
         width: 100%;
@@ -437,16 +437,12 @@ def render_agent_page(t, h, lang: str):
         0%,100% {{ opacity: 1; }}
         50%      {{ opacity: 0.7; }}
     }}
-    /* Push page content above both bars */
+    /* Push page content above both bars (mic 40px + input bar ~72px) */
     .main .block-container {{ padding-bottom: 130px !important; }}
     @media (prefers-color-scheme: dark) {{
         #zab-mic-btn {{ background: #1e1e2e; color: #ccc; border-color: rgba(255,255,255,0.1); }}
         #zab-mic-btn:hover {{ background: #26263a; }}
         #zab-mic-btn.zab-rec {{ background: #3b0000; color: #fca5a5; }}
-    }}
-    @media (max-width: 640px) {{
-        #zab-mic-btn {{ bottom: 60px; font-size: 13px; }}
-        .main .block-container {{ padding-bottom: 115px !important; }}
     }}
     </style>
 
@@ -478,6 +474,25 @@ def render_agent_page(t, h, lang: str):
             ta.focus();
         }}
 
+        /* Measure the real stBottom bar height and position mic exactly above it */
+        function positionMic() {{
+            var mic = document.getElementById('zab-mic-btn');
+            if (!mic) return;
+            var bar = document.querySelector('[data-testid="stBottom"]');
+            if (bar) {{
+                var h = bar.getBoundingClientRect().height;
+                if (h > 0) {{ mic.style.bottom = h + 'px'; return; }}
+            }}
+            /* Fallback: measure from bottom of viewport */
+            var chatInput = document.querySelector('[data-testid="stChatInput"]');
+            if (chatInput) {{
+                var rect = chatInput.getBoundingClientRect();
+                var fromBottom = window.innerHeight - rect.top;
+                if (fromBottom > 0) {{ mic.style.bottom = fromBottom + 'px'; return; }}
+            }}
+            mic.style.bottom = '72px'; /* last resort fallback */
+        }}
+
         function toggleMic(btn) {{
             if (window._zabOn) {{ if (window._zabRec) window._zabRec.stop(); return; }}
             var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -498,14 +513,23 @@ def render_agent_page(t, h, lang: str):
             // Restore visual state if recording was ongoing when rerender hit
             if (window._zabOn) {{ btn.textContent = REC; btn.classList.add('zab-rec'); }}
             btn.addEventListener('click', function(e) {{ e.preventDefault(); toggleMic(btn); }});
+            positionMic();
         }}
 
         wire();
-        // Re-wire whenever Streamlit rebuilds the DOM
+        window.addEventListener('resize', positionMic);
+
+        // Re-wire and re-position whenever Streamlit rebuilds the DOM
         new MutationObserver(function() {{
             var btn = document.getElementById('zab-mic-btn');
             if (btn && !btn._w) wire();
+            positionMic();
         }}).observe(document.body, {{childList: true, subtree: true}});
+
+        // Retry positioning after layout settles (stBottom renders async)
+        setTimeout(positionMic, 300);
+        setTimeout(positionMic, 800);
+        setTimeout(positionMic, 1500);
     }})();
     </script>
     """, unsafe_allow_html=True)
