@@ -373,46 +373,19 @@ def render_agent_page(t, h, lang: str):
         animation: zab-pulse 1.2s ease-in-out infinite;
     }}
     @keyframes zab-pulse {{ 0%,100% {{ opacity:1; }} 50% {{ opacity:0.65; }} }}
-    /* ── Grouped accordion chips ────────────────────────────────────────── */
-    .zab-groups {{ display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px 0; }}
-    .zab-group {{
-        border: 1px solid #e2e8f0; border-radius: 12px;
-        background: white; overflow: hidden;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-        /* Override the generic details style below */
-        font-size: 1rem !important; background: white !important;
+    /* ── Expander chip groups styling ──────────────────────────────────── */
+    [data-testid="stExpander"] details summary {{
+        font-size: 14px; font-weight: 700;
     }}
-    .zab-group-summary {{
-        display: flex; align-items: center; gap: 10px;
-        padding: 12px 14px; cursor: pointer; list-style: none;
-        user-select: none; border: none; background: transparent;
-        transition: background 0.12s;
-    }}
-    .zab-group-summary:hover {{ background: #f8fafc; }}
-    .zab-group-summary::-webkit-details-marker {{ display: none; }}
-    .zab-group-icon  {{ font-size: 18px; line-height: 1; }}
-    .zab-group-label {{ font-size: 14px; font-weight: 700; color: #1e293b; flex: 1; }}
-    .zab-group-chevron {{
-        font-size: 18px; color: #94a3b8; line-height: 1;
-        transition: transform 0.2s ease;
-        display: inline-block;
-    }}
-    .zab-group[open] .zab-group-chevron {{ transform: rotate(180deg); }}
-    .zab-group[open] .zab-group-summary {{ border-bottom: 1px solid #f1f5f9; }}
-    .zab-group-body {{ display: flex; flex-direction: column; gap: 0; padding: 4px 0; background: #fafafa; }}
-    .zab-group-item {{
-        display: flex; align-items: center; justify-content: space-between;
-        width: 100%; padding: 10px 16px;
+    [data-testid="stExpander"] [data-testid="stButton"] button {{
+        text-align: start; justify-content: flex-start;
+        font-size: 13px; color: #475569;
         border: none; background: transparent;
-        font-size: 13px; font-family: inherit; font-weight: 500; color: #475569;
-        cursor: pointer; text-align: start;
-        transition: background 0.1s;
-        -webkit-tap-highlight-color: transparent;
+        padding: 8px 4px;
     }}
-    .zab-group-item:hover {{ background: white; color: #c0392b; }}
-    .zab-group-item:active {{ background: #fdf2f2; }}
-    .zab-gi-text  {{ flex: 1; }}
-    .zab-gi-arrow {{ color: #cbd5e1; font-size: 16px; margin-inline-start: 8px; }}
+    [data-testid="stExpander"] [data-testid="stButton"] button:hover {{
+        color: #c0392b; background: #fdf2f2;
+    }}
     /* ── Collapsible data-source blocks ─────────────────────────────────── */
     details {{
         margin-top: 8px; border: 1px solid #e0e0e0; border-radius: 6px;
@@ -433,11 +406,6 @@ def render_agent_page(t, h, lang: str):
         #zab-mic {{ background: #1e1e2e; color: #ccc; }}
         #zab-mic:hover {{ background: #26263a; }}
         #zab-mic.zab-rec {{ background: #3b0000; color: #fca5a5; }}
-        .zab-group {{ background: #1a1a2e !important; border-color: #2d2d3e; }}
-        .zab-group-label {{ color: #f1f5f9; }}
-        .zab-group-body {{ background: #12121e; }}
-        .zab-group-item {{ color: #94a3b8; }}
-        .zab-group-item:hover {{ background: #1e1e2e; color: #fca5a5; }}
     }}
     </style>
 
@@ -456,153 +424,72 @@ def render_agent_page(t, h, lang: str):
             st.session_state.chat_messages = []
             st.rerun()
 
-    # ── Mic button + grouped accordion chips (both in normal page flow) ─────────
+    # ── Mic button (HTML, inline JS only — <script> blocks don't run in innerHTML) ──
     _mic_idle = "🎤  اضغط للتحدث  /  Tap to speak"
     _mic_rec  = "🔴  جارٍ التسجيل… اضغط للإيقاف  /  Recording… tap to stop"
+    _mic_lang = "ar-AE" if lang == "ar" else "en-US"
+    st.markdown(f"""
+    <button id="zab-mic" type="button"
+      onclick="(function(btn){{
+        var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+        if(!SR){{btn.textContent='Not supported';return;}}
+        if(window._zabRec){{window._zabRec.stop();window._zabRec=null;return;}}
+        var r=new SR();r.lang='{_mic_lang}';
+        r.onstart=function(){{btn.textContent={repr(_mic_rec)};btn.style.background='#fee2e2';btn.style.color='#b91c1c';}};
+        r.onend=function(){{btn.textContent={repr(_mic_idle)};btn.style.background='';btn.style.color='';window._zabRec=null;}};
+        r.onerror=function(){{btn.textContent={repr(_mic_idle)};btn.style.background='';btn.style.color='';window._zabRec=null;}};
+        r.onresult=function(e){{
+          var ta=document.querySelector('[data-testid=\\'stChatInput\\'] textarea');
+          if(!ta)return;
+          var s=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;
+          s.call(ta,e.results[0][0].transcript);
+          ta.dispatchEvent(new Event('input',{{bubbles:true}}));
+          ta.dispatchEvent(new Event('change',{{bubbles:true}}));
+          ta.focus();
+        }};
+        window._zabRec=r;
+        try{{r.start();}}catch(x){{}}
+      }})(this)">
+      {_mic_idle}
+    </button>
+    """, unsafe_allow_html=True)
 
-    # Groups: (icon, label_ar, label_en, [chips_ar], [chips_en])
+    # ── Grouped accordion chips — native Streamlit expander + button ──────────
+    # st.button is the ONLY reliable way to handle clicks in Streamlit.
+    # HTML/JS chips don't work because innerHTML doesn't execute <script> tags.
     _chip_groups = [
         ("📊", "التقارير", "Reports", [
-            "كم عدد الطلبات هذا الشهر؟",
-            "ما إجمالي الإيرادات هذا الشهر؟",
-            "أعطني تقريراً شاملاً بإكسل عن الستة أشهر الماضية",
-            "أي المتاجر تحقق أعلى مبيعات؟",
-        ], [
-            "How many orders this month?",
-            "What is total revenue this month?",
-            "Full Excel report for the last 6 months",
-            "Which shops have the highest sales?",
+            ("كم عدد الطلبات هذا الشهر؟",              "How many orders this month?"),
+            ("ما إجمالي الإيرادات هذا الشهر؟",          "What is total revenue this month?"),
+            ("أعطني تقريراً شاملاً بإكسل عن الستة أشهر الماضية", "Full Excel report for the last 6 months"),
+            ("أي المتاجر تحقق أعلى مبيعات؟",            "Which shops have the highest sales?"),
         ]),
         ("👥", "العملاء", "Customers", [
-            "من هم أفضل عملائنا؟",
-            "ما متوسط القيمة الحياتية للعميل؟",
-            "كم عدد العملاء في خطر الانقطاع؟",
-            "من هم العملاء الذين فقدناهم وكيف نستعيدهم؟",
-            "أنشئ حملة واتساب لأفضل العملاء",
-        ], [
-            "Who are our top customers?",
-            "What is average customer LTV?",
-            "How many users are at churn risk?",
-            "Who are lost customers and how do we win them back?",
-            "Create a WhatsApp campaign for top customers",
+            ("من هم أفضل عملائنا؟",                     "Who are our top customers?"),
+            ("ما متوسط القيمة الحياتية للعميل؟",         "What is average customer LTV?"),
+            ("كم عدد العملاء في خطر الانقطاع؟",          "How many users are at churn risk?"),
+            ("من هم العملاء الذين فقدناهم وكيف نستعيدهم؟", "Who are lost customers and how do we win them back?"),
+            ("أنشئ حملة واتساب لأفضل العملاء",           "Create a WhatsApp campaign for top customers"),
         ]),
         ("📈", "التوقعات", "Forecasts", [
-            "ما الإيرادات المتوقعة في الأسبوعين القادمين؟",
-            "توقع المبيعات للشهر القادم",
-        ], [
-            "What revenue should we expect in the next 2 weeks?",
-            "Forecast sales for next month",
+            ("ما الإيرادات المتوقعة في الأسبوعين القادمين؟", "What revenue should we expect in the next 2 weeks?"),
+            ("توقع المبيعات للشهر القادم",               "Forecast sales for next month"),
         ]),
         ("🔍", "الاتجاهات", "Trends", [
-            "ما أفضل فرص البيع المتقاطع؟",
-            "كيف توزع المستخدمون على الشرائح؟",
-            "ما أكثر أيام الأسبوع نشاطاً للطلبات؟",
-        ], [
-            "What are the top cross-selling opportunities?",
-            "What is the breakdown of user segments?",
-            "Which days of the week have the most orders?",
+            ("ما أفضل فرص البيع المتقاطع؟",              "What are the top cross-selling opportunities?"),
+            ("كيف توزع المستخدمون على الشرائح؟",          "What is the breakdown of user segments?"),
+            ("ما أكثر أيام الأسبوع نشاطاً للطلبات؟",     "Which days of the week have the most orders?"),
         ]),
     ]
 
-    def _build_group(icon, label_ar, label_en, chips_ar, chips_en):
-        label = label_ar if lang == "ar" else label_en
-        chips = chips_ar if lang == "ar" else chips_en
-        items = "".join(
-            f'<button class="zab-group-item" type="button">'
-            f'<span class="zab-gi-text">{c}</span>'
-            f'<span class="zab-gi-arrow">›</span>'
-            f'</button>'
-            for c in chips
-        )
-        return (
-            f'<details class="zab-group">'
-            f'<summary class="zab-group-summary">'
-            f'<span class="zab-group-icon">{icon}</span>'
-            f'<span class="zab-group-label">{label}</span>'
-            f'<span class="zab-group-chevron">⌄</span>'
-            f'</summary>'
-            f'<div class="zab-group-body">{items}</div>'
-            f'</details>'
-        )
-
-    _groups_html = "".join(
-        _build_group(*g) for g in _chip_groups
-    )
-
-    # HTML block: buttons only, no JS (keeps markdown parser from mangling script content)
-    st.markdown(f"""
-    <button id="zab-mic" type="button">{_mic_idle}</button>
-    <div class="zab-groups">{_groups_html}</div>
-    """, unsafe_allow_html=True)
-
-    # JS block: separate st.markdown so the parser never sees JS as markdown text
-    st.markdown(f"""
-    <script>
-    (function() {{
-        var IDLE = {repr(_mic_idle)};
-        var REC  = {repr(_mic_rec)};
-
-        function getLang() {{
-            return document.documentElement.dir === 'rtl' ? 'ar-AE' : 'en-US';
-        }}
-        function fillInput(text) {{
-            var ta = document.querySelector('[data-testid="stChatInput"] textarea');
-            if (!ta) return;
-            var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-            nativeSetter.call(ta, text);
-            ta.dispatchEvent(new Event('input',  {{bubbles: true}}));
-            ta.dispatchEvent(new Event('change', {{bubbles: true}}));
-            ta.focus();
-        }}
-
-        window._zabOn  = window._zabOn  || false;
-        window._zabRec = window._zabRec || null;
-
-        function toggleMic() {{
-            var btn = document.getElementById('zab-mic');
-            if (!btn) return;
-            if (window._zabOn) {{ if (window._zabRec) window._zabRec.stop(); return; }}
-            var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SR) {{ btn.textContent = 'Not supported'; return; }}
-            window._zabRec = new SR();
-            window._zabRec.lang = getLang();
-            window._zabRec.onstart  = function() {{ window._zabOn = true;  btn.textContent = REC;  btn.classList.add('zab-rec'); }};
-            window._zabRec.onend    = function() {{ window._zabOn = false; btn.textContent = IDLE; btn.classList.remove('zab-rec'); }};
-            window._zabRec.onerror  = function() {{ window._zabOn = false; window._zabRec = null; btn.textContent = IDLE; btn.classList.remove('zab-rec'); }};
-            window._zabRec.onresult = function(e) {{ fillInput(e.results[0][0].transcript); }};
-            try {{ window._zabRec.start(); }} catch(ex) {{}}
-        }}
-
-        function attachListeners() {{
-            /* Mic — attach once, guard with _zl flag */
-            var mic = document.getElementById('zab-mic');
-            if (mic && !mic._zl) {{
-                mic._zl = true;
-                mic.addEventListener('click', toggleMic);
-            }}
-            /* Restore recording state after rerender */
-            if (mic && window._zabOn) {{ mic.textContent = REC; mic.classList.add('zab-rec'); }}
-
-            /* Chip items — mark with data-zl so we never double-attach */
-            document.querySelectorAll('.zab-group-item:not([data-zl])').forEach(function(btn) {{
-                btn.setAttribute('data-zl', '1');
-                btn.addEventListener('click', function() {{
-                    var el = btn.querySelector('.zab-gi-text') || btn;
-                    fillInput(el.textContent.trim());
-                }});
-            }});
-        }}
-
-        attachListeners();
-
-        /* Re-run attachListeners whenever Streamlit rebuilds the DOM */
-        if (!window._zabMO) {{
-            window._zabMO = new MutationObserver(attachListeners);
-            window._zabMO.observe(document.body, {{childList: true, subtree: true}});
-        }}
-    }})();
-    </script>
-    """, unsafe_allow_html=True)
+    for icon, label_ar, label_en, pairs in _chip_groups:
+        label = f"{icon} {label_ar}" if lang == "ar" else f"{icon} {label_en}"
+        with st.expander(label):
+            for text_ar, text_en in pairs:
+                chip_text = text_ar if lang == "ar" else text_en
+                if st.button(chip_text, key=f"chip_{chip_text}", use_container_width=True):
+                    st.session_state.pending_prompt = chip_text
+                    st.rerun()
 
     # ── Chat history ──────────────────────────────────────────────────────────
     for i, msg in enumerate(st.session_state.chat_messages):
