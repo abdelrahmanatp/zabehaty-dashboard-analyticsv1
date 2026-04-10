@@ -373,22 +373,46 @@ def render_agent_page(t, h, lang: str):
         animation: zab-pulse 1.2s ease-in-out infinite;
     }}
     @keyframes zab-pulse {{ 0%,100% {{ opacity:1; }} 50% {{ opacity:0.65; }} }}
-    /* ── Quick-action chips ─────────────────────────────────────────────── */
-    .zab-chips {{
-        display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;
-        margin-bottom: 12px; scrollbar-width: none;
+    /* ── Grouped accordion chips ────────────────────────────────────────── */
+    .zab-groups {{ display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px 0; }}
+    .zab-group {{
+        border: 1px solid #e2e8f0; border-radius: 12px;
+        background: white; overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        /* Override the generic details style below */
+        font-size: 1rem !important; background: white !important;
     }}
-    .zab-chips::-webkit-scrollbar {{ display: none; }}
-    .zab-chip {{
-        flex-shrink: 0; padding: 7px 14px;
-        border: 1px solid #e2e8f0; border-radius: 9999px;
-        background: white; color: #475569;
-        font-size: 13px; font-family: inherit; font-weight: 500;
-        cursor: pointer; white-space: nowrap;
-        transition: all 0.15s; box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+    .zab-group-summary {{
+        display: flex; align-items: center; gap: 10px;
+        padding: 12px 14px; cursor: pointer; list-style: none;
+        user-select: none; border: none; background: transparent;
+        transition: background 0.12s;
     }}
-    .zab-chip:hover  {{ border-color: #c0392b44; background: #fdf2f2; color: #c0392b; }}
-    .zab-chip:active {{ transform: scale(0.96); }}
+    .zab-group-summary:hover {{ background: #f8fafc; }}
+    .zab-group-summary::-webkit-details-marker {{ display: none; }}
+    .zab-group-icon  {{ font-size: 18px; line-height: 1; }}
+    .zab-group-label {{ font-size: 14px; font-weight: 700; color: #1e293b; flex: 1; }}
+    .zab-group-chevron {{
+        font-size: 18px; color: #94a3b8; line-height: 1;
+        transition: transform 0.2s ease;
+        display: inline-block;
+    }}
+    .zab-group[open] .zab-group-chevron {{ transform: rotate(180deg); }}
+    .zab-group[open] .zab-group-summary {{ border-bottom: 1px solid #f1f5f9; }}
+    .zab-group-body {{ display: flex; flex-direction: column; gap: 0; padding: 4px 0; background: #fafafa; }}
+    .zab-group-item {{
+        display: flex; align-items: center; justify-content: space-between;
+        width: 100%; padding: 10px 16px;
+        border: none; background: transparent;
+        font-size: 13px; font-family: inherit; font-weight: 500; color: #475569;
+        cursor: pointer; text-align: start;
+        transition: background 0.1s;
+        -webkit-tap-highlight-color: transparent;
+    }}
+    .zab-group-item:hover {{ background: white; color: #c0392b; }}
+    .zab-group-item:active {{ background: #fdf2f2; }}
+    .zab-gi-text  {{ flex: 1; }}
+    .zab-gi-arrow {{ color: #cbd5e1; font-size: 16px; margin-inline-start: 8px; }}
     /* ── Collapsible data-source blocks ─────────────────────────────────── */
     details {{
         margin-top: 8px; border: 1px solid #e0e0e0; border-radius: 6px;
@@ -409,7 +433,11 @@ def render_agent_page(t, h, lang: str):
         #zab-mic {{ background: #1e1e2e; color: #ccc; }}
         #zab-mic:hover {{ background: #26263a; }}
         #zab-mic.zab-rec {{ background: #3b0000; color: #fca5a5; }}
-        .zab-chip {{ background: #1e1e2e; border-color: #2d2d3e; color: #94a3b8; }}
+        .zab-group {{ background: #1a1a2e !important; border-color: #2d2d3e; }}
+        .zab-group-label {{ color: #f1f5f9; }}
+        .zab-group-body {{ background: #12121e; }}
+        .zab-group-item {{ color: #94a3b8; }}
+        .zab-group-item:hover {{ background: #1e1e2e; color: #fca5a5; }}
     }}
     </style>
 
@@ -428,18 +456,82 @@ def render_agent_page(t, h, lang: str):
             st.session_state.chat_messages = []
             st.rerun()
 
-    # ── Mic button + quick-action chips (both in normal page flow) ────────────
+    # ── Mic button + grouped accordion chips (both in normal page flow) ─────────
     _mic_idle = "🎤  اضغط للتحدث  /  Tap to speak"
     _mic_rec  = "🔴  جارٍ التسجيل… اضغط للإيقاف  /  Recording… tap to stop"
-    _chips_ar = ["كم طلب هذا الشهر؟", "متوسط LTV للعميل", "أفضل العملاء", "العملاء المفقودون", "تقرير كامل بإكسل"]
-    _chips_en = ["Orders this month", "Avg customer LTV", "Top customers", "Lost users", "Full Excel report"]
-    _chips    = _chips_ar if lang == "ar" else _chips_en
-    _chips_html = "".join(
-        f'<button class="zab-chip" onclick="window._zabChip(this)">{c}</button>' for c in _chips
+
+    # Groups: (icon, label_ar, label_en, [chips_ar], [chips_en])
+    _chip_groups = [
+        ("📊", "التقارير", "Reports", [
+            "كم عدد الطلبات هذا الشهر؟",
+            "ما إجمالي الإيرادات هذا الشهر؟",
+            "أعطني تقريراً شاملاً بإكسل عن الستة أشهر الماضية",
+            "أي المتاجر تحقق أعلى مبيعات؟",
+        ], [
+            "How many orders this month?",
+            "What is total revenue this month?",
+            "Full Excel report for the last 6 months",
+            "Which shops have the highest sales?",
+        ]),
+        ("👥", "العملاء", "Customers", [
+            "من هم أفضل عملائنا؟",
+            "ما متوسط القيمة الحياتية للعميل؟",
+            "كم عدد العملاء في خطر الانقطاع؟",
+            "من هم العملاء الذين فقدناهم وكيف نستعيدهم؟",
+            "أنشئ حملة واتساب لأفضل العملاء",
+        ], [
+            "Who are our top customers?",
+            "What is average customer LTV?",
+            "How many users are at churn risk?",
+            "Who are lost customers and how do we win them back?",
+            "Create a WhatsApp campaign for top customers",
+        ]),
+        ("📈", "التوقعات", "Forecasts", [
+            "ما الإيرادات المتوقعة في الأسبوعين القادمين؟",
+            "توقع المبيعات للشهر القادم",
+        ], [
+            "What revenue should we expect in the next 2 weeks?",
+            "Forecast sales for next month",
+        ]),
+        ("🔍", "الاتجاهات", "Trends", [
+            "ما أفضل فرص البيع المتقاطع؟",
+            "كيف توزع المستخدمون على الشرائح؟",
+            "ما أكثر أيام الأسبوع نشاطاً للطلبات؟",
+        ], [
+            "What are the top cross-selling opportunities?",
+            "What is the breakdown of user segments?",
+            "Which days of the week have the most orders?",
+        ]),
+    ]
+
+    def _build_group(icon, label_ar, label_en, chips_ar, chips_en):
+        label = label_ar if lang == "ar" else label_en
+        chips = chips_ar if lang == "ar" else chips_en
+        items = "".join(
+            f'<button class="zab-group-item" onclick="window._zabChip(this)">'
+            f'<span class="zab-gi-text">{c}</span>'
+            f'<span class="zab-gi-arrow">›</span>'
+            f'</button>'
+            for c in chips
+        )
+        return (
+            f'<details class="zab-group">'
+            f'<summary class="zab-group-summary">'
+            f'<span class="zab-group-icon">{icon}</span>'
+            f'<span class="zab-group-label">{label}</span>'
+            f'<span class="zab-group-chevron">⌄</span>'
+            f'</summary>'
+            f'<div class="zab-group-body">{items}</div>'
+            f'</details>'
+        )
+
+    _groups_html = "".join(
+        _build_group(*g) for g in _chip_groups
     )
+
     st.markdown(f"""
     <button id="zab-mic" type="button" onclick="window._zabToggle(this)">{_mic_idle}</button>
-    <div class="zab-chips">{_chips_html}</div>
+    <div class="zab-groups">{_groups_html}</div>
     <script>
     (function() {{
         var IDLE = {repr(_mic_idle)};
