@@ -529,22 +529,27 @@ def render_agent_page(t, h, lang: str):
         _build_group(*g) for g in _chip_groups
     )
 
+    # HTML block: buttons only, no JS (keeps markdown parser from mangling script content)
     st.markdown(f"""
     <button id="zab-mic" type="button">{_mic_idle}</button>
-    <div class="zab-groups" id="zab-groups">{_groups_html}</div>
+    <div class="zab-groups">{_groups_html}</div>
+    """, unsafe_allow_html=True)
+
+    # JS block: separate st.markdown so the parser never sees JS as markdown text
+    st.markdown(f"""
     <script>
     (function() {{
         var IDLE = {repr(_mic_idle)};
         var REC  = {repr(_mic_rec)};
 
         function getLang() {{
-            return (document.documentElement.dir === 'rtl') ? 'ar-AE' : 'en-US';
+            return document.documentElement.dir === 'rtl' ? 'ar-AE' : 'en-US';
         }}
         function fillInput(text) {{
             var ta = document.querySelector('[data-testid="stChatInput"] textarea');
             if (!ta) return;
-            var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-            setter.call(ta, text);
+            var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+            nativeSetter.call(ta, text);
             ta.dispatchEvent(new Event('input',  {{bubbles: true}}));
             ta.dispatchEvent(new Event('change', {{bubbles: true}}));
             ta.focus();
@@ -558,37 +563,43 @@ def render_agent_page(t, h, lang: str):
             if (!btn) return;
             if (window._zabOn) {{ if (window._zabRec) window._zabRec.stop(); return; }}
             var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SR) {{ btn.textContent = '❌  Not supported in this browser'; return; }}
+            if (!SR) {{ btn.textContent = 'Not supported'; return; }}
             window._zabRec = new SR();
             window._zabRec.lang = getLang();
             window._zabRec.onstart  = function() {{ window._zabOn = true;  btn.textContent = REC;  btn.classList.add('zab-rec'); }};
             window._zabRec.onend    = function() {{ window._zabOn = false; btn.textContent = IDLE; btn.classList.remove('zab-rec'); }};
             window._zabRec.onerror  = function() {{ window._zabOn = false; window._zabRec = null; btn.textContent = IDLE; btn.classList.remove('zab-rec'); }};
             window._zabRec.onresult = function(e) {{ fillInput(e.results[0][0].transcript); }};
-            try {{ window._zabRec.start(); }} catch(_) {{}}
+            try {{ window._zabRec.start(); }} catch(ex) {{}}
         }}
 
-        /* Event delegation — no inline onclick attributes, avoids React error #231 */
-        if (!window._zabListenerAttached) {{
-            window._zabListenerAttached = true;
-            document.body.addEventListener('click', function(e) {{
-                /* Mic button */
-                var mic = e.target.closest('#zab-mic');
-                if (mic) {{ toggleMic(); return; }}
-                /* Accordion chip items */
-                var item = e.target.closest('.zab-group-item');
-                if (item) {{
-                    var el = item.querySelector('.zab-gi-text') || item;
+        function attachListeners() {{
+            /* Mic — attach once, guard with _zl flag */
+            var mic = document.getElementById('zab-mic');
+            if (mic && !mic._zl) {{
+                mic._zl = true;
+                mic.addEventListener('click', toggleMic);
+            }}
+            /* Restore recording state after rerender */
+            if (mic && window._zabOn) {{ mic.textContent = REC; mic.classList.add('zab-rec'); }}
+
+            /* Chip items — mark with data-zl so we never double-attach */
+            document.querySelectorAll('.zab-group-item:not([data-zl])').forEach(function(btn) {{
+                btn.setAttribute('data-zl', '1');
+                btn.addEventListener('click', function() {{
+                    var el = btn.querySelector('.zab-gi-text') || btn;
                     fillInput(el.textContent.trim());
-                }}
+                }});
             }});
         }}
 
-        /* Restore recording visual state after Streamlit rerenders */
-        (function() {{
-            var btn = document.getElementById('zab-mic');
-            if (btn && window._zabOn) {{ btn.textContent = REC; btn.classList.add('zab-rec'); }}
-        }})();
+        attachListeners();
+
+        /* Re-run attachListeners whenever Streamlit rebuilds the DOM */
+        if (!window._zabMO) {{
+            window._zabMO = new MutationObserver(attachListeners);
+            window._zabMO.observe(document.body, {{childList: true, subtree: true}});
+        }}
     }})();
     </script>
     """, unsafe_allow_html=True)
