@@ -378,49 +378,77 @@ def render_agent_page(t, h, lang: str):
     # closure and survives Streamlit rerenders without resetting.
     st.markdown("""
     <style>
-    /* Narrow the chat input so text doesn't run under the mic button — LTR */
-    [data-testid="stBottom"] > div > div {
-        padding-right: 58px !important;
+    /*
+     * Layout: stBottom bar = 90% wide, mic fills the remaining 10%.
+     * Both sit at the same height — true side-by-side, no tricks.
+     *
+     * LTR: text input on left (90%), mic on right (10%)
+     * RTL: mic on left (10%), text input on right (90%)
+     */
+
+    /* LTR — shrink the bottom bar to 90%, leaving 10% on the right for mic */
+    [data-testid="stBottom"] {
+        width: 90% !important;
+        right: 0 !important;
+        left: auto !important;
     }
-    /* RTL (Arabic): send button is on the left, so mic goes on the left too */
-    [dir="rtl"] [data-testid="stBottom"] > div > div {
-        padding-right: 0   !important;
-        padding-left:  58px !important;
+
+    /* RTL — shrink to 90% from the right, leaving 10% on the left for mic */
+    [dir="rtl"] [data-testid="stBottom"] {
+        left: 0 !important;
+        right: auto !important;
     }
-    /* Mic button base styles — JS sets left/right based on dir */
+
+    /* Mic button: fixed, fills the 10% gap at the same height as the bottom bar */
     #zab-mic-btn {
         position: fixed;
-        bottom: 12px;
-        right: 14px;      /* LTR default */
-        left: auto;
+        bottom: 0;
+        width: 10%;
+        height: 68px;       /* matches stBottom bar height */
         z-index: 99999;
-        width: 44px;
-        height: 44px;
-        border-radius: 10px;
-        border: 1.5px solid rgba(100,100,100,0.25);
-        background: #ffffff;
+        border: none;
+        border-top: 1px solid rgba(100,100,100,0.15);
+        border-left: 1px solid rgba(100,100,100,0.15);
+        background: var(--background-color, #ffffff);
         cursor: pointer;
-        font-size: 20px;
+        font-size: 22px;
         display: flex !important;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.14);
         user-select: none;
         -webkit-user-select: none;
-        transition: background 0.15s, border-color 0.15s, transform 0.1s;
+        transition: background 0.15s;
         -webkit-tap-highlight-color: transparent;
+        /* LTR: mic sits on the right (left edge of 10% gap = 90% from left) */
+        left: 90%;
+        right: auto;
     }
-    #zab-mic-btn:hover  { border-color: rgba(100,100,100,0.5); transform: scale(1.05); }
-    #zab-mic-btn:active { transform: scale(0.96); }
-    #zab-mic-btn.zab-rec { background: #fee2e2; border-color: #f87171; }
+    /* RTL: mic sits on the left (right edge of 10% gap = 90% from right) */
+    [dir="rtl"] #zab-mic-btn {
+        right: 90%;
+        left: auto;
+        border-left: none;
+        border-right: 1px solid rgba(100,100,100,0.15);
+    }
+
+    #zab-mic-btn:hover  { background: rgba(100,100,100,0.07); }
+    #zab-mic-btn:active { background: rgba(100,100,100,0.15); }
+    #zab-mic-btn.zab-rec {
+        background: #fee2e2;
+        animation: zab-pulse 1s infinite;
+    }
+    @keyframes zab-pulse {
+        0%, 100% { background: #fee2e2; }
+        50%       { background: #fecaca; }
+    }
     @media (prefers-color-scheme: dark) {
-        #zab-mic-btn { background: #2a2a3a; border-color: rgba(255,255,255,0.2); }
-        #zab-mic-btn.zab-rec { background: #4a0000; border-color: #f87171; }
+        #zab-mic-btn { background: #1e1e2e; }
+        #zab-mic-btn:hover { background: #2a2a3e; }
+        #zab-mic-btn.zab-rec { background: #4a0000; }
     }
+    /* Mobile: mic slightly smaller, same proportions */
     @media (max-width: 640px) {
-        #zab-mic-btn { width: 40px; height: 40px; font-size: 18px; bottom: 10px; }
-        [data-testid="stBottom"] > div > div { padding-right: 54px !important; }
-        [dir="rtl"] [data-testid="stBottom"] > div > div { padding-right: 0 !important; padding-left: 54px !important; }
+        #zab-mic-btn { font-size: 19px; height: 60px; }
     }
     </style>
 
@@ -461,14 +489,9 @@ def render_agent_page(t, h, lang: str):
         }
 
         function positionMic(btn) {
-            var isRtl = document.documentElement.dir === 'rtl' || document.body.dir === 'rtl';
-            if (isRtl) {
-                btn.style.right = 'auto';
-                btn.style.left  = '14px';
-            } else {
-                btn.style.left  = 'auto';
-                btn.style.right = '14px';
-            }
+            // Positioning is handled by CSS [dir="rtl"] selectors.
+            // This function is a no-op kept so MutationObserver can call it
+            // without errors; it's here in case JS-level overrides are needed later.
         }
 
         function createMic() {
