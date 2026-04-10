@@ -886,26 +886,14 @@ def inject_css():
             font-weight: 700 !important;
             color: #c0392b !important;
         }
+        /* Arabic sidebar: keep RTL text direction, let Streamlit control open/close */
+        section[data-testid="stSidebar"] > div:first-child {
+            direction: rtl !important;
+        }
         /* ── Mobile (Arabic) ── */
         @media (max-width: 768px) {
             .block-container { padding: 0.75rem 0.5rem !important; max-width: 100vw !important; overflow-x: hidden !important; }
             .stApp, .main, .main > div { overflow-x: hidden !important; max-width: 100vw !important; }
-            /* Sidebar: Arabic = opens from the RIGHT on mobile */
-            section[data-testid="stSidebar"] {
-                position: fixed !important; z-index: 999 !important;
-                width: 85vw !important; max-width: 320px !important;
-                direction: ltr !important;
-                right: 0 !important; left: auto !important;
-                height: 100vh !important; overflow-y: auto !important;
-                -webkit-overflow-scrolling: touch !important;
-            }
-            /* Inner sidebar content stays RTL and scrollable */
-            section[data-testid="stSidebar"] > div {
-                direction: rtl !important;
-                height: 100% !important; overflow-y: auto !important;
-            }
-            /* Main content area must not be offset by sidebar */
-            .main .block-container { margin-left: 0 !important; margin-right: 0 !important; }
             [data-testid="stDataFrame"], [data-testid="stDataFrameResizable"], .stDataFrame, .stTable { overflow-x: auto !important; max-width: 100% !important; font-size: 12px !important; }
             [data-testid="stDataFrame"] table, .stDataFrame table { min-width: unset !important; }
             .js-plotly-plot, .plotly, [data-testid="stPlotlyChart"] { max-width: 100% !important; overflow: hidden !important; }
@@ -959,20 +947,7 @@ def inject_css():
                 overflow-x: hidden !important;
                 max-width: 100vw !important;
             }
-            /* Sidebar: overlay mode — never bleeds into content, fully scrollable */
-            section[data-testid="stSidebar"] {
-                position: fixed !important;
-                z-index: 999 !important;
-                width: 85vw !important;
-                max-width: 320px !important;
-                height: 100vh !important;
-                overflow-y: auto !important;
-                -webkit-overflow-scrolling: touch !important;
-            }
-            section[data-testid="stSidebar"] > div {
-                height: 100% !important;
-                overflow-y: auto !important;
-            }
+            /* Sidebar: let Streamlit control open/close natively */
             /* Tables: horizontal scroll within container, don't expand page */
             [data-testid="stDataFrame"],
             [data-testid="stDataFrameResizable"],

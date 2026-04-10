@@ -334,19 +334,151 @@ def render_agent_page(t, h, lang: str):
     client = _get_client()
     system = build_system_prompt()
 
-    # ── Header ────────────────────────────────────────────────────────────────
-    hcol1, hcol2 = st.columns([8, 1])
-    with hcol1:
-        st.title(t("agent_title"))
-        st.caption(t("agent_subtitle"))
-    with hcol2:
-        # Only show trash icon when there is an active conversation
-        if st.session_state.chat_messages:
-            if st.button("🗑️", key="clear_conv", help=t("agent_clear")):
-                st.session_state.chat_messages = []
-                st.rerun()
+    # ── Sticky header ─────────────────────────────────────────────────────────
+    import base64 as _b64
+    _logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Zabehaty Logo 1.svg")
+    try:
+        with open(_logo_path, "rb") as _f:
+            _logo_b64 = _b64.b64encode(_f.read()).decode()
+        _logo_tag = f'<img src="data:image/svg+xml;base64,{_logo_b64}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">'
+    except Exception:
+        _logo_tag = '<span style="font-size:24px;">🥩</span>'
 
-    st.divider()
+    st.markdown(f"""
+    <style>
+    /* ── Sticky header ─────────────────────────────────────────────────── */
+    #zab-header {{
+        position: sticky; top: 0; z-index: 100;
+        background: rgba(255,255,255,0.93); backdrop-filter: blur(8px);
+        border-bottom: 1px solid #e2e8f0;
+        padding: 10px 16px; margin: -1rem -1rem 0 -1rem;
+        display: flex; align-items: center; gap: 10px;
+    }}
+    #zab-header-title {{ font-size: 15px; font-weight: 700; color: #1e293b; line-height: 1.2; margin: 0; }}
+    #zab-header-sub   {{ font-size: 10px; color: #64748b; font-weight: 600;
+                         letter-spacing: 0.05em; text-transform: uppercase; margin: 0; }}
+    /* ── Mic bar (in normal page flow — NO position:fixed) ─────────────── */
+    #zab-mic {{
+        display: block; width: 100%;
+        padding: 12px 0; margin: 14px 0 6px 0;
+        border: none; border-radius: 10px;
+        background: #f4f4f5; color: #444;
+        font-size: 14px; font-family: inherit;
+        cursor: pointer; text-align: center;
+        transition: background 0.15s; -webkit-tap-highlight-color: transparent;
+    }}
+    #zab-mic:hover  {{ background: #e8e8ea; }}
+    #zab-mic.zab-rec {{
+        background: #fee2e2; color: #b91c1c;
+        animation: zab-pulse 1.2s ease-in-out infinite;
+    }}
+    @keyframes zab-pulse {{ 0%,100% {{ opacity:1; }} 50% {{ opacity:0.65; }} }}
+    /* ── Quick-action chips ─────────────────────────────────────────────── */
+    .zab-chips {{
+        display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;
+        margin-bottom: 12px; scrollbar-width: none;
+    }}
+    .zab-chips::-webkit-scrollbar {{ display: none; }}
+    .zab-chip {{
+        flex-shrink: 0; padding: 7px 14px;
+        border: 1px solid #e2e8f0; border-radius: 9999px;
+        background: white; color: #475569;
+        font-size: 13px; font-family: inherit; font-weight: 500;
+        cursor: pointer; white-space: nowrap;
+        transition: all 0.15s; box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+    }}
+    .zab-chip:hover  {{ border-color: #c0392b44; background: #fdf2f2; color: #c0392b; }}
+    .zab-chip:active {{ transform: scale(0.96); }}
+    /* ── Collapsible data-source blocks ─────────────────────────────────── */
+    details {{
+        margin-top: 8px; border: 1px solid #e0e0e0; border-radius: 6px;
+        padding: 0; background: #f9f9f9; font-size: 0.82rem;
+    }}
+    details summary {{
+        cursor: pointer; padding: 5px 10px; color: #555;
+        font-weight: 500; list-style: none; user-select: none;
+    }}
+    details summary::-webkit-details-marker {{ display: none; }}
+    details[open] summary {{ border-bottom: 1px solid #e0e0e0; }}
+    details > *:not(summary) {{ padding: 8px 12px; }}
+    details pre {{ font-size: 0.78rem; background: #f0f0f0; border-radius: 4px; padding: 8px; overflow-x: auto; }}
+    /* ── Dark mode ───────────────────────────────────────────────────────── */
+    @media (prefers-color-scheme: dark) {{
+        #zab-header {{ background: rgba(15,15,25,0.93); border-color: rgba(255,255,255,0.08); }}
+        #zab-header-title {{ color: #f1f5f9; }}
+        #zab-mic {{ background: #1e1e2e; color: #ccc; }}
+        #zab-mic:hover {{ background: #26263a; }}
+        #zab-mic.zab-rec {{ background: #3b0000; color: #fca5a5; }}
+        .zab-chip {{ background: #1e1e2e; border-color: #2d2d3e; color: #94a3b8; }}
+    }}
+    </style>
+
+    <div id="zab-header">
+      {_logo_tag}
+      <div>
+        <p id="zab-header-title">{t("agent_title")}</p>
+        <p id="zab-header-sub">{t("agent_subtitle")}</p>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Clear conversation button ─────────────────────────────────────────────
+    if st.session_state.chat_messages:
+        if st.button("🗑️ " + t("agent_clear"), key="clear_conv"):
+            st.session_state.chat_messages = []
+            st.rerun()
+
+    # ── Mic button + quick-action chips (both in normal page flow) ────────────
+    _mic_idle = "🎤  اضغط للتحدث  /  Tap to speak"
+    _mic_rec  = "🔴  جارٍ التسجيل… اضغط للإيقاف  /  Recording… tap to stop"
+    _chips_ar = ["كم طلب هذا الشهر؟", "متوسط LTV للعميل", "أفضل العملاء", "العملاء المفقودون", "تقرير كامل بإكسل"]
+    _chips_en = ["Orders this month", "Avg customer LTV", "Top customers", "Lost users", "Full Excel report"]
+    _chips    = _chips_ar if lang == "ar" else _chips_en
+    _chips_html = "".join(
+        f'<button class="zab-chip" onclick="window._zabChip(this)">{c}</button>' for c in _chips
+    )
+    st.markdown(f"""
+    <button id="zab-mic" type="button" onclick="window._zabToggle(this)">{_mic_idle}</button>
+    <div class="zab-chips">{_chips_html}</div>
+    <script>
+    (function() {{
+        var IDLE = {repr(_mic_idle)};
+        var REC  = {repr(_mic_rec)};
+        function getLang() {{
+            return (document.documentElement.dir === 'rtl') ? 'ar-AE' : 'en-US';
+        }}
+        function fillInput(text) {{
+            var ta = document.querySelector('[data-testid="stChatInput"] textarea');
+            if (!ta) return;
+            var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+            setter.call(ta, text);
+            ta.dispatchEvent(new Event('input',  {{bubbles: true}}));
+            ta.dispatchEvent(new Event('change', {{bubbles: true}}));
+            ta.focus();
+        }}
+        window._zabOn   = window._zabOn   || false;
+        window._zabRec  = window._zabRec  || null;
+        window._zabChip = function(btn) {{ fillInput(btn.textContent.trim()); }};
+        window._zabToggle = function(btn) {{
+            if (window._zabOn) {{ if (window._zabRec) window._zabRec.stop(); return; }}
+            var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SR) {{ btn.textContent = '❌  Not supported in this browser'; return; }}
+            window._zabRec = new SR();
+            window._zabRec.lang = getLang();
+            window._zabRec.onstart  = function() {{ window._zabOn = true;  btn.textContent = REC;  btn.classList.add('zab-rec'); }};
+            window._zabRec.onend    = function() {{ window._zabOn = false; btn.textContent = IDLE; btn.classList.remove('zab-rec'); }};
+            window._zabRec.onerror  = function() {{ window._zabOn = false; window._zabRec = null; btn.textContent = IDLE; btn.classList.remove('zab-rec'); }};
+            window._zabRec.onresult = function(e) {{ fillInput(e.results[0][0].transcript); }};
+            try {{ window._zabRec.start(); }} catch(_) {{}}
+        }};
+        /* Restore recording visual state after Streamlit rerenders */
+        (function() {{
+            var btn = document.getElementById('zab-mic');
+            if (btn && window._zabOn) {{ btn.textContent = REC; btn.classList.add('zab-rec'); }}
+        }})();
+    }})();
+    </script>
+    """, unsafe_allow_html=True)
 
     # ── Chat history ──────────────────────────────────────────────────────────
     for i, msg in enumerate(st.session_state.chat_messages):
@@ -365,174 +497,6 @@ def render_agent_page(t, h, lang: str):
                     mime      = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key       = f"dl_{i}",
                 )
-
-    # ── CSS: collapsible provenance blocks ───────────────────────────────────
-    st.markdown("""
-    <style>
-    details {
-        margin-top: 8px; border: 1px solid #e0e0e0; border-radius: 6px;
-        padding: 0; background: #f9f9f9; font-size: 0.82rem;
-    }
-    details summary {
-        cursor: pointer; padding: 5px 10px; color: #555;
-        font-weight: 500; list-style: none; user-select: none;
-    }
-    details summary::-webkit-details-marker { display: none; }
-    details[open] summary { border-bottom: 1px solid #e0e0e0; }
-    details > *:not(summary) { padding: 8px 12px; }
-    details pre { font-size: 0.78rem; background: #f0f0f0; border-radius: 4px; padding: 8px; overflow-x: auto; }
-    </style>
-    """, unsafe_allow_html=True)
-
-    # ── Mic button: full-width bar fixed just above the chat input ───────────
-    # Plain HTML button rendered in the main document — no iframe, no injection.
-    # window._zab* globals persist across Streamlit rerenders so recording state
-    # is never lost. MutationObserver re-wires click handler if React rebuilds
-    # the element. stBottom restored to full width (no more 90/10 split hack).
-    _mic_idle = "🎤  اضغط هنا للتحدث  /  Tap here to speak"
-    _mic_rec  = "🔴  جارٍ التسجيل…  اضغط للإيقاف  /  Recording…  tap to stop"
-    st.markdown(f"""
-    <style>
-    /* Restore stBottom to full width */
-    [data-testid="stBottom"] {{
-        width: 100% !important;
-        left: 0 !important;
-        right: 0 !important;
-    }}
-    /* Full-width mic bar — bottom is set dynamically by JS */
-    #zab-mic-btn {{
-        position: fixed;
-        bottom: 72px;          /* safe fallback; JS overrides with real stBottom height */
-        left: 0;
-        right: 0;
-        width: 100%;
-        height: 40px;
-        z-index: 9998;
-        margin: 0;
-        padding: 0;
-        border: none;
-        border-top: 1px solid rgba(0,0,0,0.10);
-        border-bottom: 1px solid rgba(0,0,0,0.06);
-        background: #f4f4f5;
-        color: #444;
-        cursor: pointer;
-        font-size: 14px;
-        font-family: inherit;
-        letter-spacing: 0.01em;
-        display: flex !important;
-        align-items: center;
-        justify-content: center;
-        transition: background 0.15s;
-        -webkit-tap-highlight-color: transparent;
-        user-select: none;
-    }}
-    #zab-mic-btn:hover  {{ background: #e8e8ea; }}
-    #zab-mic-btn:active {{ background: #dcdcde; }}
-    #zab-mic-btn.zab-rec {{
-        background: #fee2e2;
-        color: #b91c1c;
-        animation: zab-pulse 1.2s ease-in-out infinite;
-    }}
-    @keyframes zab-pulse {{
-        0%,100% {{ opacity: 1; }}
-        50%      {{ opacity: 0.7; }}
-    }}
-    /* Push page content above both bars (mic 40px + input bar ~72px) */
-    .main .block-container {{ padding-bottom: 130px !important; }}
-    @media (prefers-color-scheme: dark) {{
-        #zab-mic-btn {{ background: #1e1e2e; color: #ccc; border-color: rgba(255,255,255,0.1); }}
-        #zab-mic-btn:hover {{ background: #26263a; }}
-        #zab-mic-btn.zab-rec {{ background: #3b0000; color: #fca5a5; }}
-    }}
-    </style>
-
-    <button id="zab-mic-btn" type="button">{_mic_idle}</button>
-
-    <script>
-    (function() {{
-        // window-level globals — survive every Streamlit rerender
-        if (window._zabInited) return;
-        window._zabInited = true;
-        window._zabOn  = false;
-        window._zabRec = null;
-
-        var IDLE = {repr(_mic_idle)};
-        var REC  = {repr(_mic_rec)};
-
-        function getLang() {{
-            return (document.documentElement.dir === 'rtl' || document.body.dir === 'rtl')
-                ? 'ar-AE' : 'en-US';
-        }}
-
-        function fillInput(text) {{
-            var ta = document.querySelector('[data-testid="stChatInput"] textarea');
-            if (!ta) return;
-            var s = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-            s.call(ta, text);
-            ta.dispatchEvent(new Event('input',  {{bubbles: true}}));
-            ta.dispatchEvent(new Event('change', {{bubbles: true}}));
-            ta.focus();
-        }}
-
-        /* Measure the real stBottom bar height and position mic exactly above it */
-        function positionMic() {{
-            var mic = document.getElementById('zab-mic-btn');
-            if (!mic) return;
-            var bar = document.querySelector('[data-testid="stBottom"]');
-            if (bar) {{
-                var h = bar.getBoundingClientRect().height;
-                if (h > 0) {{ mic.style.bottom = h + 'px'; return; }}
-            }}
-            /* Fallback: measure from bottom of viewport */
-            var chatInput = document.querySelector('[data-testid="stChatInput"]');
-            if (chatInput) {{
-                var rect = chatInput.getBoundingClientRect();
-                var fromBottom = window.innerHeight - rect.top;
-                if (fromBottom > 0) {{ mic.style.bottom = fromBottom + 'px'; return; }}
-            }}
-            mic.style.bottom = '72px'; /* last resort fallback */
-        }}
-
-        function toggleMic(btn) {{
-            if (window._zabOn) {{ if (window._zabRec) window._zabRec.stop(); return; }}
-            var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SR) {{ btn.textContent = '❌  Voice recognition not supported in this browser'; return; }}
-            window._zabRec = new SR();
-            window._zabRec.lang = getLang();
-            window._zabRec.onstart  = function() {{ window._zabOn = true;  btn.textContent = REC;  btn.classList.add('zab-rec'); }};
-            window._zabRec.onend    = function() {{ window._zabOn = false; btn.textContent = IDLE; btn.classList.remove('zab-rec'); }};
-            window._zabRec.onerror  = function() {{ window._zabOn = false; window._zabRec = null; btn.textContent = IDLE; btn.classList.remove('zab-rec'); }};
-            window._zabRec.onresult = function(e) {{ fillInput(e.results[0][0].transcript); }};
-            try {{ window._zabRec.start(); }} catch(_) {{ window._zabRec = null; }}
-        }}
-
-        function wire() {{
-            var btn = document.getElementById('zab-mic-btn');
-            if (!btn || btn._w) return;
-            btn._w = true;
-            // Restore visual state if recording was ongoing when rerender hit
-            if (window._zabOn) {{ btn.textContent = REC; btn.classList.add('zab-rec'); }}
-            btn.addEventListener('click', function(e) {{ e.preventDefault(); toggleMic(btn); }});
-            positionMic();
-        }}
-
-        wire();
-        window.addEventListener('resize', positionMic);
-
-        // Re-wire and re-position whenever Streamlit rebuilds the DOM
-        new MutationObserver(function() {{
-            var btn = document.getElementById('zab-mic-btn');
-            if (btn && !btn._w) wire();
-            positionMic();
-        }}).observe(document.body, {{childList: true, subtree: true}});
-
-        // Retry positioning after layout settles (stBottom renders async)
-        setTimeout(positionMic, 300);
-        setTimeout(positionMic, 800);
-        setTimeout(positionMic, 1500);
-    }})();
-    </script>
-    """, unsafe_allow_html=True)
 
     # ── Text input ────────────────────────────────────────────────────────────
     user_text = st.chat_input(t("agent_placeholder"))
